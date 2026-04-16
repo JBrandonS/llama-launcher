@@ -1,0 +1,10 @@
+# Dependencies for Llama Launcher
+# Core dependencies
+llama-cpp-python
+click
+pydantic
+huggingface_hub
+
+# Testing dependencies
+pytest
+pytest-mock

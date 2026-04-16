@@ -1,0 +1,24 @@
+# Llama Launcher Default Configuration
+# This configuration defines the default behavior and paths for the launcher.
+
+# --- Core Settings ---
+default_model_path: "~/.cache/huggingface/hub"
+working_directory: "~/.cache/llama-launcher/models"
+
+# --- Llama.cpp Runtime Options ---
+# These are the default arguments passed to llama.cpp.
+default_options:
+  n_ctx: 2048               # Context size (max tokens)
+  n_gpu_layers: -1          # Use all available GPU layers (-1)
+  temp: 0.7                 # Sampling temperature
+  top_k: 40
+  top_p: 0.9
+  n_predict: 512            # Max tokens to generate
+
+# --- Model Search/Detection Settings ---
+# The path where local models are expected to be found.
+local_model_search_paths:
+  - "~/.cache/huggingface/hub"
+
+# Hugging Face search parameters
+default_hf_search_query: "llama 7b"

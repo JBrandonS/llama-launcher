@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+# This is the main executable wrapper for the Llama Launcher CLI.
+
+import os
+import sys
+from pathlib import Path
+from llama_launcher.cli import cli
+
+def main():
+    """
+    Main function to run the CLI application.
+    """
+    try:
+        # The CLI function handles all argument parsing and execution
+        cli()
+    except Exception as e:
+        # Catch any top-level errors not handled by click
+        print(f"FATAL ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
