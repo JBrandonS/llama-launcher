@@ -17,15 +17,18 @@ class TestModelManager(unittest.TestCase):
 
     @patch('pathlib.Path.glob')
     @patch('pathlib.Path.exists', return_value=True)
-    def test_autodetect_local_models_success(self, mock_exists, mock_glob):
+    @patch('pathlib.Path.iterdir')
+    def test_autodetect_local_models_success(self, mock_iterdir, mock_exists, mock_glob):
         # Setup mock file system for success case
         mock_glob.return_value = [Path("/tmp/test_models/model_a_7b.gguf")]
-        
+        mock_iterdir.return_value = []  # No subdirectories
+
         detected = self.manager.autodetect_local_models()
-        
+
         self.assertEqual(len(detected), 1)
         self.assertIn("model_a_7b", detected)
-        self.assertEqual(detected["model_a_7b"], Path("/tmp/test_models/model_a_7b.gguf"))
+        self.assertIn("path", detected["model_a_7b"])
+        self.assertEqual(detected["model_a_7b"]["path"], Path("/tmp/test_models/model_a_7b.gguf"))
 
     @patch('pathlib.Path.glob')
     @patch('pathlib.Path.exists', return_value=False)
@@ -40,25 +43,27 @@ class TestModelManager(unittest.TestCase):
     @patch('huggingface_hub.HfApi.hf_hub_download')
     @patch('pathlib.Path.exists', return_value=True)
     @patch('pathlib.Path.glob')
-    def test_download_model_and_autodetect(self, mock_glob, mock_exists, mock_download):
+    @patch('pathlib.Path.iterdir')
+    def test_download_model_and_autodetect(self, mock_iterdir, mock_glob, mock_exists, mock_download):
         # Setup mock local environment
         mock_exists.return_value = True
-        
+        mock_iterdir.return_value = []  # No subdirectories
+
         # Setup the mock glob to return the file that the download function creates
         downloaded_path = Path("/tmp/qwen3_downloaded/qwen3-1.gguf")
         mock_glob.return_value = [downloaded_path]
-        
+
         # Setup mock download to return the specific path
         mock_download.return_value = downloaded_path
-        
+
         # Test download
         manager = ModelManager(self.mock_config)
         downloaded_model_path = manager.download_model("qwen3", Path("/tmp/qwen3_downloaded"))
-        
+
         self.assertEqual(downloaded_model_path, downloaded_path)
         mock_download.assert_called_once()
-        
+
         # Test auto-detection after download
         detected = manager.autodetect_local_models()
-        self.assertIn("qwen3", detected)
-        self.assertEqual(detected["qwen3"], downloaded_path)
+        self.assertIn("qwen3-1", detected)
+        self.assertEqual(detected["qwen3-1"]["path"], downloaded_path)

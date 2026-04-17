@@ -14,11 +14,14 @@ default_options:
   top_k: 40
   top_p: 0.9
   n_predict: 512            # Max tokens to generate
+  threads: 8 # Default thread count
 
 # --- Model Search/Detection Settings ---
 # The path where local models are expected to be found.
 local_model_search_paths:
+  - "~/.cache/llama.cpp/models"
   - "~/.cache/huggingface/hub"
+  - "/home/b/git/llama-launcher/models"
 
 # Hugging Face search parameters
 default_hf_search_query: "llama 7b"

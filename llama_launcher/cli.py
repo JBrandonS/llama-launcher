@@ -1,10 +1,11 @@
 # llama_launcher/cli.py
-
+import asyncio
 import click
 from pathlib import Path
 from llama_launcher.config import load_config
 from llama_launcher.model_manager import ModelManager
 from llama_launcher.llama_runner import LlamaRunner
+import json
 
 
 @click.group()
@@ -28,7 +29,7 @@ def cli():
 @click.option(
     "--options",
     type=str,
-    help="Custom comma-separated llama.cpp options (e.g., temp=0.8,n_ctx=4096).",
+    help="Custom comma-separated llama.cpp options (e.g., temp=0.8,n_ctx=4096) or JSON string.",
 )
 @click.option(
     "--background", is_flag=True, help="Run the model as a detached background process."
@@ -51,7 +52,7 @@ def run(model: Path, name: str, prompt: str, options: str, background: bool):
             # Attempt to resolve shortcut name
             detected_models = model_manager.autodetect_local_models()
             if name in detected_models:
-                resolved_model_path = detected_models[name]
+                resolved_model_path = detected_models[name]["path"]
                 click.echo(
                     f"✅ Resolved model name '{name}' to path: {resolved_model_path}"
                 )
@@ -67,61 +68,46 @@ def run(model: Path, name: str, prompt: str, options: str, background: bool):
             click.echo("ERROR: Must specify either --name or --model path.")
             return
 
-        # 4. Parse Custom Options (Basic implementation)
+        # 4. Parse Custom Options
         custom_opts = {}
         if options:
-            for item in options.split(","):
-                if "=" in item:
-                    key, value = item.split("=")
-                    custom_opts[key.strip()] = value.strip()
-
-        # 5. Run Model and Stream Output
-        click.echo("======================================")
-        click.echo("🚀 Llama Launcher Initializing...")
-        click.echo("======================================")
-
-        process = runner.run_model(str(resolved_model_path), custom_opts)
-
-        if background:
-            click.echo("✨ Running in background. PID: {}".format(process.pid))
-            # Detach the process and exit the CLI
-            process.detach()
-            return
-
-        # Write initial prompt to stdin (required for many LLMs)
-        if process is not None:
-            process.stdin.write(prompt + "\n")
-            process.stdin.flush()
-
-            # Stream output line by line
-            while True:
-                output = process.stdout.readline()
-                if output == "" and process.poll() is not None:
-                    break
-                if output:
-                    # Print output directly to simulate interactive UI
-                    print(output.strip())
-
-            # Wait for the process to fully terminate and get the return code
-            return_code = process.wait()
-
-            if return_code == 0:
-                click.echo("\n======================================")
-                click.echo("✅ Model generation complete successfully.")
-                click.echo("======================================")
-            else:
-                click.echo("\n======================================")
+            try:
+                # Attempt to parse options as a JSON dictionary for robust handling
+                custom_opts = json.loads(options)
+            except json.JSONDecodeError:
+                # Fallback to comma-separated key=value format if JSON parsing fails
+                for item in options.split(","):
+                    if "=" in item:
+                        key, value = item.split("=")
+                        custom_opts[key.strip()] = value.strip()
                 click.echo(
-                    f"❌ Model generation failed. Llama.cpp exited with code {return_code}."
+                    f"⚠️ Warning: Options were parsed using comma-separated key=value format."
                 )
-                click.echo("======================================")
 
-    except FileNotFoundError as e:
-        click.echo(f"ERROR: Configuration file missing. {e}")
-    except RuntimeError as e:
-        click.echo(f"CRITICAL RUNTIME ERROR: {e}")
+        # 5. Run Model using Mock Runner (Scaffolding Phase)
+        click.echo("======================================")
+        click.echo("🚀 Llama Launcher Running Mock Model Runner...")
+        click.echo("======================================")
+
+        try:
+            # Call the mock runner to satisfy the interface contract
+            mock_result = runner.run_model_mock(
+                str(resolved_model_path), prompt, custom_opts
+            )
+
+            # Output the deterministic mock result as JSON for easy verification
+            print(json.dumps(mock_result, indent=2))
+
+        except ValueError as e:
+            click.echo(f"\n❌ Input Validation Error: {e}")
     except Exception as e:
-        click.echo(f"An unexpected error occurred: {e}")
+        click.echo(f"\n❌ A general error occurred during mock execution: {e}")
+    finally:
+        click.echo("======================================")
+        click.echo(
+            "✅ Mock model run completed. (This is a scaffold and does not execute llama.cpp yet.)"
+        )
+        click.echo("======================================")
 
 
 @cli.command()
@@ -135,16 +121,28 @@ def server_status():
 
     try:
         # Attempt to query a running process or check a known port/endpoint
-        # For simplicity and robustness, we check for a running process that looks like a server.
-        result = terminal(command="pgrep -f 'llama.cpp.*server' | xargs ps aux")
-        output = result.get("output", "")
+        # For simplicity and robustness, check for a running process
+        import subprocess
 
-        if not output.strip():
+        result = subprocess.run(
+            ["pgrep", "-f", "llama.cpp.*server"],
+            capture_output=True,
+            text=True,
+        )
+
+        if not result.stdout.strip():
             click.echo("  (No running llama.cpp server process found.)")
             return
 
         click.echo("✅ Server Process Detected. Details:")
-        click.echo(output)
+        output = subprocess.run(
+            ["ps", "aux"],
+            capture_output=True,
+            text=True,
+        )
+        for line in output.stdout.split("\n"):
+            if "llama.cpp" in line:
+                click.echo(line)
 
     except Exception as e:
         click.echo(f"❌ Failed to check server status: {e}")
@@ -159,9 +157,14 @@ def ps():
     click.echo("🔍 Running llama.cpp Processes:")
 
     try:
-        # Use terminal tool for OS interaction
-        result = terminal(command="ps aux | grep llama.cpp")
-        output = result.get("output", "")
+        import subprocess
+
+        result = subprocess.run(
+            ["ps", "aux"],
+            capture_output=True,
+            text=True,
+        )
+        output = result.stdout
 
         if not output.strip():
             click.echo("  (No running llama.cpp processes found.)")
@@ -171,86 +174,6 @@ def ps():
 
     except Exception as e:
         click.echo(f"❌ Failed to run process check: {e}")
-        if process is not None:
-            process.stdin.write(prompt + "\n")
-            process.stdin.flush()
-
-            # Stream output line by line
-            while True:
-                output = process.stdout.readline()
-                if output == "" and process.poll() is not None:
-                    break
-                if output:
-                    # Print output directly to simulate interactive UI
-                    print(output.strip())
-
-            # Wait for the process to fully terminate and get the return code
-            return_code = process.wait()
-
-            if return_code == 0:
-                print("\n======================================")
-                print("✅ Model generation complete successfully.")
-                print("======================================")
-            else:
-                print("\n======================================")
-                print(
-                    f"❌ Model generation failed. Llama.cpp exited with code {return_code}."
-                )
-                print("======================================")
-
-
-@cli.command()
-def server_status():
-    """
-    Checks the status and operational information of a running llama.cpp server.
-    NOTE: This command requires a server process to be running and accessible.
-    """
-    click.echo("=======================================")
-    click.echo("🌐 Llama.cpp Server Status Check")
-
-    try:
-        # Attempt to query a running process or check a known port/endpoint
-        # For simplicity and robustness, we check for a running process that looks like a server.
-        result = terminal(command="pgrep -f 'llama.cpp.*server' | xargs ps aux")
-        output = result.get("output", "")
-
-        if not output.strip():
-            click.echo("  (No running llama.cpp server process found.)")
-            return
-
-        click.echo("✅ Server Process Detected. Details:")
-        click.echo(output)
-
-    except Exception as e:
-        click.echo(f"❌ Failed to check server status: {e}")
-
-
-@cli.command()
-def ps():
-    """
-    Lists all running llama.cpp processes.
-    """
-    click.echo("=======================================")
-    click.echo("🔍 Running llama.cpp Processes:")
-
-    try:
-        # Use terminal tool for OS interaction
-        result = terminal(command="ps aux | grep llama.cpp")
-        output = result.get("output", "")
-
-        if not output.strip():
-            click.echo("  (No running llama.cpp processes found.)")
-            return
-
-        click.echo(output)
-
-    except Exception as e:
-        click.echo(f"❌ Failed to run process check: {e}")
-
-    except FileNotFoundError as e:
-        click.echo(f"ERROR: {e}")
-    except Exception as e:
-        click.echo(f"An unexpected error occurred: {e}")
 
 
 @cli.command()
@@ -264,17 +187,14 @@ def arena():
 
         # Get all local models for selection
         local_models = manager.autodetect_local_models()
-        available_models = {
-            k: {"type": "local", "path": v} for k, v in local_models.items()
-        }
+        available_models = list(local_models.keys())  # Just use the model IDs
 
         # Prompt user to select models
         click.echo("======================================")
         click.echo("⚔️ Llama Launcher Model Arena")
         click.echo("======================================")
 
-        model_choices = {}
-        for i, (name, details) in enumerate(available_models.items()):
+        for i, name in enumerate(available_models):
             click.echo(f"[{i + 1}] {name} (Local)")
 
         model_names_selected = click.prompt(
@@ -289,9 +209,14 @@ def arena():
 
         selected_models = []
         for i in selected_names:
-            if i < len(available_models):
-                model_name = list(available_models.keys())[i]
-                selected_models.append(available_models[model_name]["path"])
+            if 0 <= i < len(available_models):
+                model_name = available_models[i]
+                path = manager.registry.get_path(model_name)
+                if path:
+                    selected_models.append(path)
+                else:
+                    click.echo(f"Invalid model number: {i + 1}")
+                    return
             else:
                 click.echo(f"Invalid model number: {i + 1}")
                 return
@@ -304,12 +229,19 @@ def arena():
             f"\n🚀 Starting Arena Benchmark for {len(selected_models)} models..."
         )
 
-        # Delegate benchmarking to ModelManager (or a dedicated ArenaRunner)
+        # Delegate benchmarking to ModelManager
         runner = LlamaRunner(config)
         manager.run_benchmark(selected_models, runner)
 
     except Exception as e:
         click.echo(f"ERROR: Failed to run the Model Arena. {e}")
+
+
+@cli.command()
+def list_models():
+    """
+    Lists available models from local storage and Hugging Face.
+    """
     try:
         config = load_config()
         manager = ModelManager(config)
@@ -320,8 +252,9 @@ def arena():
         click.echo("======================================")
         click.echo("🤖 Detected Local Models:")
         if local_models:
-            for name, path in local_models.items():
-                click.echo(f"  - {name} (Path: {path})")
+            for model_id, info in local_models.items():
+                path = info.get("path")
+                click.echo(f"  - {model_id} (Path: {path})")
         else:
             click.echo("  (No local GGUF models found.)")
 
@@ -345,5 +278,6 @@ def arena():
     except Exception as e:
         click.echo(f"ERROR: Failed to list models. {e}")
 
-    except Exception as e:
-        click.echo(f"Error listing models: {e}")
+
+if __name__ == "__main__":
+    cli()

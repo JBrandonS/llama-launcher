@@ -9,7 +9,7 @@ class LlamaConfig(BaseModel):
     """Defines the structure for the application configuration."""
     default_model_path: Path = Field(default=Path("~/.cache/llama-launcher/default_model.gguf"))
     working_directory: Path = Field(default=Path("~/.cache/llama-launcher/models"))
-    local_model_search_paths: List[Path] = Field(default_factory=lambda: [Path("~/.cache/llama-launcher/local_models"), Path("~/.cache/models/gguf")])
+    local_model_search_paths: List[Path] = Field(default_factory=lambda: [Path("~/.cache/llama.cpp/models"), Path("~/.cache/huggingface/hub")])
     default_hf_search_query: str = "llama 7b"
 
     # Llama.cpp Runtime Options
@@ -29,15 +29,24 @@ def load_config(config_path: Path = Path("config.yaml")) -> LlamaConfig:
     try:
         with open(config_path, 'r') as f:
             config_data = yaml.safe_load(f)
-        
+
         # Convert string paths to Path objects for Pydantic validation
         processed_data = {}
         for key, value in config_data.items():
             if isinstance(value, str) and value.startswith('~'):
                 processed_data[key] = Path(value).expanduser()
+            elif isinstance(value, list):
+                # Handle lists of paths (like local_model_search_paths)
+                processed_value = []
+                for item in value:
+                    if isinstance(item, str) and item.startswith('~'):
+                        processed_value.append(Path(item).expanduser())
+                    else:
+                        processed_value.append(item)
+                processed_data[key] = processed_value
             else:
                 processed_data[key] = value
-        
+
         return LlamaConfig(**processed_data)
     except FileNotFoundError:
         raise FileNotFoundError(f"Configuration file not found at {config_path}")
