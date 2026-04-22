@@ -5,13 +5,20 @@ import subprocess
 from typing import Dict, Any, List, Optional
 from llama_launcher.config import LlamaConfig
 
-# Assuming llama.cpp is available in the environment PATH
 class LlamaRunner:
     """Handles the execution of llama.cpp."""
 
     def __init__(self, config: LlamaConfig):
         self.config = config
-        self.llama_cli = "llama.cpp/main"
+        self.llama_cli = self._find_llama_executable()
+
+    @staticmethod
+    def _find_llama_executable() -> str:
+        import shutil
+        for name in ("llama-server", "llama-cli", "llama.cpp/main", "main", "llama_cpp_server"):
+            if shutil.which(name):
+                return name
+        return "llama-server"
 
     def generate_command(
         self, model_path: str, custom_options: Optional[Dict[str, Any]] = None
@@ -23,10 +30,18 @@ class LlamaRunner:
         command = [self.llama_cli, "-m", model_path]
 
         # Apply default options
-        options = {
-            k: getattr(self.config, k)
-            for k in ["n_ctx", "n_gpu_layers", "temp", "top_k", "top_p", "n_predict"]
+        _ATTR_MAP = {
+            "n_ctx": "n_ctx",
+            "n_gpu_layers": "n_gpu_layers",
+            "temperature": "temp",
+            "threads": "threads",
+            "top_k": "top_k",
+            "top_p": "top_p",
+            "n_predict": "n_predict",
         }
+        options = {}
+        for attr, key in _ATTR_MAP.items():
+            options[key] = getattr(self.config, attr)
 
         # Merge custom options
         if custom_options:
@@ -47,7 +62,8 @@ class LlamaRunner:
                 cli_args.append(f"--top-p {value}")
             elif key == "n_predict":
                 cli_args.append(f"--n-predict {value}")
-            # Add other llama.cpp flags here as needed
+            elif key == "threads":
+                cli_args.append(f"--threads {value}")
         
         command.extend(cli_args)
         return command

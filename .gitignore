@@ -1,10 +1,52 @@
-.history/
-.pytest_cache/
-.ruff_cache/
+# Virtual environment
 .venv/
 venv/
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# History / undo
+.history/
+
+# Tool internal state
+.omc/
+.sisyphus/
+.config/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+*.whl
+
+# User-specific configuration
+config.yaml
+
+# Runtime data
+.llama_launcher/pids/
+
+# Logs
 *.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db

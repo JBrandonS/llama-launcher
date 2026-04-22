@@ -3,14 +3,16 @@ import unittest
 import os
 import tempfile
 from pathlib import Path
-from llama_launcher.model_manager import scan_local_models
+from llama_launcher.model_manager import scan_local_models, ModelRegistry
+from typing import Optional, List
 
 class TestModelScanner(unittest.TestCase):
     """Tests the scan_local_models function."""
 
     def test_scan_local_models_default_returns_list(self):
         """Tests that scan_local_models returns a list."""
-        result = scan_local_models()
+        registry = ModelRegistry()
+        result = scan_local_models(registry)
         self.assertIsInstance(result, list)
 
     def test_scan_local_models_with_custom_path(self):
@@ -20,19 +22,21 @@ class TestModelScanner(unittest.TestCase):
             Path(tmpdir, "test-model-1.gguf").touch()
             Path(tmpdir, "test-model-2.gguf").touch()
             Path(tmpdir, "readme.txt").write_text("not a model")
-            
-            result = scan_local_models([tmpdir])
-            
+
+            registry = ModelRegistry()
+            result = scan_local_models(registry, [tmpdir])
+
             self.assertEqual(len(result), 2)
-            self.assertTrue(all(m["name"].endswith(".gguf") for m in result)))
-            self.assertTrue(all(m["source"] == "local" for m in result)))
-            
+            self.assertTrue(all("path" in m and m["source"] == "local" for m in result))
+            self.assertTrue(all(str(m["path"]).endswith(".gguf") for m in result))
+
     def test_scan_local_models_json_serializable(self):
         """Tests JSON serialization."""
         with tempfile.TemporaryDirectory() as tmpdir:
             Path(tmpdir, "model.gguf").touch()
-            result = scan_local_models([tmpdir])
-            
+            registry = ModelRegistry()
+            result = scan_local_models(registry, [tmpdir])
+
             import json
             json_output = json.dumps(result)
             self.assertIsInstance(json_output, str)
@@ -42,15 +46,17 @@ class TestModelScanner(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             Path(tmpdir, "model.gguf").touch()
             Path(tmpdir, "model.bin").touch()
-            
-            result = scan_local_models([tmpdir])
-            
+
+            registry = ModelRegistry()
+            result = scan_local_models(registry, [tmpdir])
+
             self.assertEqual(len(result), 1)
-            self.assertTrue(result[0]["name"].endswith(".gguf"))
+            self.assertTrue(str(result[0]["path"]).endswith(".gguf"))
 
     def test_scan_local_models_non_existent_path(self):
         """Tests graceful handling of non-existent paths."""
-        result = scan_local_models(["/non/existent/path"])
+        registry = ModelRegistry()
+        result = scan_local_models(registry, ["/non/existent/path"])
         self.assertEqual(result, [])
 
 if __name__ == '__main__':

@@ -51,22 +51,31 @@ class TestBenchmark(unittest.TestCase):
 
     def test_run_benchmark_runner_integration(self):
         """Tests that a custom runner is invoked."""
-        mock_runner = MagicMock(return_value={"status": "mock"})
-        
+        called = [False]
+        def mock_runner(*a, **kw):
+            called[0] = True
+            return {"command": ["echo", "test"]}
+
         result = run_benchmark("/path", "prompt", {}, runner=mock_runner)
-        
+
         # Verify the custom runner was called
-        mock_runner.assert_called_once()
+        self.assertTrue(called[0])
         
     def test_run_benchmark_metrics_are_non_negative(self):
         """Tests that metrics stay non-negative."""
         result = run_benchmark("/path/to/model.gguf", "Prompt text.", {})
-        
+
         self.assertGreaterEqual(result["generated_tokens"], 0)
         self.assertGreaterEqual(result["metrics"]["first_token_latency_ms"], 0)
         self.assertGreaterEqual(result["metrics"]["end_to_end_latency_ms"], 0)
         self.assertGreaterEqual(result["metrics"]["throughput_tokens_per_second"], 0)
         self.assertGreaterEqual(result["metrics"]["memory_usage_mb"], 0)
+
+    def test_run_benchmark_mode_field_present(self):
+        """Tests that every benchmark result has a mode field."""
+        result = run_benchmark("/path/to/model.gguf", "Prompt text.", {})
+        self.assertIn("mode", result)
+        self.assertIn(result["mode"], ("real", "synthetic"))
 
 if __name__ == '__main__':
     unittest.main()

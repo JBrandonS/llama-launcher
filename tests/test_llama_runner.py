@@ -19,9 +19,10 @@ class TestLlamaRunner(unittest.TestCase):
         # Test command generation with default options
         command = self.runner.generate_command(self.test_model_path)
 
-        self.assertTrue(command[0].endswith("main"))  # Check for executable name
-        self.assertTrue("-m" in command)  # Check for model path flag
-        self.assertTrue(len(command) > 2)  # Ensure multiple args exist
+        self.assertIsInstance(command[0], str)
+        self.assertEqual(command[1], "-m")
+        self.assertEqual(command[2], self.test_model_path)
+        self.assertTrue(len(command) > 2)
 
     @patch('llama_launcher.llama_runner.subprocess.Popen')
     def test_run_model_success(self, mock_popen):

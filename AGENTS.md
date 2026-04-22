@@ -1,17 +1,69 @@
-# AGENTS.md: Llama Launcher Context
+# llama-launcher — Project Context
 
-## ⚙️ Setup & Dependencies
--   **Prerequisites:** Requires Python 3.10+ and a compiled `llama.cpp` executable in the system PATH.
--   **Install:** Run `pip install -r requirements.txt` to install all dependencies (`llama-cpp-python`, `huggingface_hub`, etc.).
--   **Configuration:** Global settings (e.g., default model paths) are managed in `config.yaml`.
+## What This Is
+CLI tool for managing and running LLaMA.cpp GGUF models. Provides model discovery, downloading, configuration management, background serving, benchmarking, and monitoring.
 
-## 🚀 Core Workflow Commands
--   **Discovery (List Models):** Use `python llama_launcher/cli.py list-models` to scan local GGUF models and search Hugging Face.
--   **Execution (Run Model):** Execute models via `python llama_launcher/cli.py run --model <path> --prompt "<query>" --options "<settings>"`.
--   **Testing:** The full test suite is located in the `tests/` directory and runs via `pytest tests/`.
+## Stack
+- Python 3.10+, Click for CLI, Pydantic v2 for config, PyYAML, huggingface-hub
+- No async in cli.py — all HfApi calls go through `asyncio.run()` wrappers
+- Build: `pip install -e .` (pyproject.toml + setuptools)
+- Test: `pytest tests/`
 
-## 🧩 Architecture Notes
--   The core model interaction and execution logic resides in `llama_runner.py`.
--   Models must be in GGUF format.
+## Directory Layout
+```
+llama_launcher/        # Package
+  cli.py               # Click commands entry point
+  config.py            # Pydantic LlamaConfig + YAML loader
+  model_manager.py     # Local model scanning (GGUF), HF search
+  llama_runner.py      # llama-server/llama-cli subprocess launcher
+  process_manager.py   # PID files, start/stop/status for background servers
+  download.py          # HuggingFace snapshot download
+  benchmark.py         # Performance measurement via llama-cli
+  daemon.py            # Systemd service file generation
+  context.py           # Higher-level orchestrator (config + models)
+  config_store.py      # Saved profiles (~/.llama_launcher/configs/)
+  logger.py            # Human-readable logging, verbosity levels 0/1/2
+  model_cards.py       # HF README.md parsing for recommended params
+  exceptions.py        # Custom exceptions
+tests/                 # pytest files (match test_*.py)
+config.yaml           # Default settings (untracked per .gitignore)
+llama-launcher         # Entrypoint script (wrapper around cli:cli)
+pyproject.toml
+```
 
-(End of file - total 17 lines)
+## Key Defaults
+- Server binary: `llama-server` (looked up via `shutil.which`)
+- CLI binary: `llama-cli`
+- Default port: 12345 (from config.yaml or LlamaConfig.server_port)
+- Model search paths: `~/.cache/llama.cpp/models`, `~/.cache/huggingface/hub`, `~/models`
+- PID directory: `~/.llama_launcher/pids/`
+- Config profiles: `~/.llama_launcher/configs/`
+
+## Logging
+Verbosity controlled by `-v` / `-vv` flags on the group command.
+- 0 (default): Errors only → stderr, format `[ERROR] message`
+- 1 (`-v`): Info+ → stdout for info, stderr for warnings/errors, format `[INFO] message`
+- 2 (`-vv`): Debug+ with timestamps and module names
+
+## CLI Commands
+| Command | Purpose |
+|---|---|
+| `run` | Launch model (background by default, `--foreground` for sync) |
+| `list-models` | Show local models (`--names-only` for just IDs) |
+| `search <query>` | Search HF for GGUF models |
+| `download <id>` | Download a GGUF model from HF |
+| `ps` | List running servers (`--json` for JSON output) |
+| `server-status` | Check single server health |
+| `server-metrics` | Fetch live token throughput metrics |
+| `stop` | Stop a background server |
+| `logs` | Tail server log file (`-f` to follow) |
+| `arena` | Benchmark models head-to-head |
+| `model-cards <id>` | Show HF README.md params for recommended settings |
+| `save-config` / `load-config` / `list-configs` | Named config profiles |
+| `daemon start/stop/status` | Systemd service generation and management |
+
+## Rules
+- Never suppress type errors with `as any` or `@ts-ignore` (N/A in Python, but: never use `type: ignore` to hide real errors)
+- Port comes from config by default; CLI `--port` overrides
+- All subprocess calls should handle FileNotFoundError gracefully
+- Keep changes minimal and focused — one task per commit
