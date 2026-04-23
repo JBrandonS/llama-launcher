@@ -1,31 +1,41 @@
-# Llama Launcher - Progress Tracking
+# make_ui Progress
 
-## Project Completion Status
-All planned stages have been completed as of the latest execution cycle.
+## Section A: Foundations ✅ COMPLETE
+- [x] A1: React+TS+Vite scaffold
+- [x] A2: Design tokens/theme (light/dark)
+- [x] A3: App shell (sidebar, top bar, breadcrumb)
+- [x] A4: Routing structure
 
-## Stage 1: Foundation & Discovery (CLI Core)
-**Status: Completed**
+## Section B: API Contracts ✅ COMPLETE
+- [x] B1: OpenAPI types + API client (Fetch-based)
+- [x] B2: TanStack Query hooks
+- [x] B3: WebSocket service (reconnect, subscriptions)
+- [x] B4: Error handling utilities
 
-## Stage 2: Model Runner (Execution)
-**Status: Completed**
+## Section H: Missing Logs Page ✅ COMPLETE (was build blocker)
+- [x] LogsPage component (344 lines, search/filter/level/tail)
 
-## Stage 3: Benchmarking Arena
-**Status: Completed**
+## Section C: Server management UX
+- [x] C1: Server list page (table, status badges, search, filter, sort)
+- [ ] C2: Server detail page - STUB
+- [ ] C3: Create/edit server flow
 
-## Stage 4: Local Model Scanning (High Priority)
-**Status: Completed**
+## Section E: Dashboard
+- [ ] E1: Overview metrics cards
+- [ ] E2: Resource graphs
+- [ ] E3: System health summary
+- [ ] E4: Alerts/notifications
 
-## Stage 5: Hugging Face Integration (Low Priority)
-**Status: Completed**
+## Section D: textgen option parity
+- [ ] D1-D4: Parameter form, groups, presets
 
-## Stage 6: Startup Daemon
-**Status: Completed**
+## Section F: Daemon
+- [x] F1-F2: Daemon status card + controls
+- [ ] F3: Daemon log viewer with tail
+- [ ] F4: Auto-launch policy manager
 
-## Stage 7: Integration & End-to-End Testing
-**Status: Completed**
+## Section G: UX Quality
+- [ ] G1-G4: Loading states, toasts, confirm dialogs, responsive
 
-## Stage 8: Documentation & GitHub Setup
-**Status: Completed**
-
-## Current Progress
-All Stages Complete. Project is ready for further development or release.
+## Section I: Testing
+- [ ] Test suites

@@ -1,69 +1,131 @@
-# llama-launcher — Project Context
+# llama-launcher — Knowledge Base
 
-## What This Is
-CLI tool for managing and running LLaMA.cpp GGUF models. Provides model discovery, downloading, configuration management, background serving, benchmarking, and monitoring.
+**Generated:** 2026-04-22
+**Commit:** 2260217
+**Branch:** main
 
-## Stack
-- Python 3.10+, Click for CLI, Pydantic v2 for config, PyYAML, huggingface-hub
-- No async in cli.py — all HfApi calls go through `asyncio.run()` wrappers
-- Build: `pip install -e .` (pyproject.toml + setuptools)
-- Test: `pytest tests/`
+## OVERVIEW
+Launch and manage llama.cpp inference servers (GGUF models) via CLI + React dashboard. Python backend (click CLI, Pydantic config, stdlib logging) + React frontend (Vite 6, React Router v6 lazy routes, React Query, sonner toasts, Tailwind CSS). Server defaults to port **12345**.
 
-## Directory Layout
+## STRUCTURE
 ```
-llama_launcher/        # Package
-  cli.py               # Click commands entry point
-  config.py            # Pydantic LlamaConfig + YAML loader
-  model_manager.py     # Local model scanning (GGUF), HF search
-  llama_runner.py      # llama-server/llama-cli subprocess launcher
-  process_manager.py   # PID files, start/stop/status for background servers
-  download.py          # HuggingFace snapshot download
-  benchmark.py         # Performance measurement via llama-cli
-  daemon.py            # Systemd service file generation
-  context.py           # Higher-level orchestrator (config + models)
-  config_store.py      # Saved profiles (~/.llama_launcher/configs/)
-  logger.py            # Human-readable logging, verbosity levels 0/1/2
-  model_cards.py       # HF README.md parsing for recommended params
-  exceptions.py        # Custom exceptions
-tests/                 # pytest files (match test_*.py)
-config.yaml           # Default settings (untracked per .gitignore)
-llama-launcher         # Entrypoint script (wrapper around cli:cli)
-pyproject.toml
+llama-launcher/
+├── llama_launcher/   # 🔑 Python backend (14 .py modules)
+│   ├── cli.py        # Click CLI group, 15+ subcommands
+│   ├── config.py     # Pydantic LlamaConfig — tri-source loading
+│   ├── model_manager.py  # Auto-detect GGUF + HF search
+│   ├── llama_runner.py   # CLI arg builder + subprocess exec
+│   ├── process_manager.py# PID files, start/stop/status
+│   ├── daemon.py       # Systemd service generator
+│   ├── download.py     # HF model download helpers
+│   ├── benchmark.py    # Parse output, build benchmark commands
+│   ├── context.py      # Click context helper — resolve model, execute
+│   ├── config_store.py # Save/load named configs (JSON files)
+│   ├── logger.py       # stdlib logging: 3 verbosity levels, JSON formatter
+│   ├── exceptions.py   # Exception hierarchy
+│   ├── model_cards.py  # Parse HF model card YAML frontmatter
+│   └── __init__.py     # Deferred imports, __all__ exports
+├── ui/               # React/TypeScript frontend (Vite 6)
+│   ├── src/modules/  # 6 page components (lazy-loaded)
+│   ├── src/services/ # API, WS, error clients
+│   ├── src/components/ # Shared: common, tables, forms, charts
+│   ├── src/app/      # Router shell, ErrorBoundary wrapper
+│   └── src/styles/   # Tailwind CSS vars (dark/light class-based)
+├── tests/            # 7 unittest.TestCase files + Playwright E2E
+├── tools/            # ZERA prompt quality checker
+├── config.yaml       # Runtime defaults
+├── pyproject.toml    # Build, entry point, deps
+├── SOUL.md           # Agent OS (must load first)
+├── PROGRESS.md       # Dev progress log
+└── .config/          # IDE MCP servers
 ```
 
-## Key Defaults
-- Server binary: `llama-server` (looked up via `shutil.which`)
-- CLI binary: `llama-cli`
-- Default port: 12345 (from config.yaml or LlamaConfig.server_port)
-- Model search paths: `~/.cache/llama.cpp/models`, `~/.cache/huggingface/hub`, `~/models`
-- PID directory: `~/.llama_launcher/pids/`
-- Config profiles: `~/.llama_launcher/configs/`
+## WHERE TO LOOK
+| Task | Location | Notes |
+|------|----------|-------|
+| Add CLI command | `llama_launcher/cli.py` | Click group, 15+ subcommands, -v/-vv flags |
+| Change model/config | `llama_launcher/config.py` | LlamaConfig Pydantic model, tri-source |
+| Model detection | `llama_launcher/model_manager.py` | autodetect_local_models + HfApi search |
+| Spawn llama.cpp | `llama_launcher/llama_runner.py` | generate_command, _ATTR_MAP, run_model |
+| PID/process mgmt | `llama_launcher/process_manager.py` | start_server, stop_server, status |
+| Daemon/systemd | `llama_launcher/daemon.py` | generate_systemd_service, start/stop daemon |
+| Frontend pages | `ui/src/modules/` | DashboardPage, ServersPage, SettingsPage, DaemonPage, ServerDetailPage |
+| API/WS clients | `ui/src/services/` | apiService, wsService (exponential backoff), errorService |
+| Shared UI | `ui/src/components/common/` | Sidebar, TopBar, Breadcrumb, ErrorBoundary |
+| Add test | `tests/` | unittest.TestCase (not pytest despite pyproject.toml listing) |
+| Prompt quality | `tools/prompt_check.py` | ZERA framework validation |
 
-## Logging
-Verbosity controlled by `-v` / `-vv` flags on the group command.
-- 0 (default): Errors only → stderr, format `[ERROR] message`
-- 1 (`-v`): Info+ → stdout for info, stderr for warnings/errors, format `[INFO] message`
-- 2 (`-vv`): Debug+ with timestamps and module names
+## CODE MAP (Key Symbols)
+| Symbol | Type | Location | Role |
+|--------|------|----------|------|
+| `cli()` | function | `llama_launcher/cli.py` | Click group, 15+ subcommands |
+| `LlamaConfig` | class | `llama_launcher/config.py` | Pydantic model, tri-source loading |
+| `ModelManager` | class | `llama_launcher/model_manager.py` | autodetect_local_models, search_huggingface, run_benchmark |
+| `LlamaRunner` | class | `llama_launcher/llama_runner.py` | generate_command, run_model_sync/async/mock |
+| `ProcessManager` | class | `llama_launcher/process_manager.py` | start/stop/status_server, list_servers, PID_DIR |
+| `App` | component | `ui/src/app/App.tsx` | Router shell, lazy routes, ErrorBoundary per route |
+| `Daemon` | class | `llama_launcher/daemon.py` | Thread-based daemon, reload event |
+| `ConfigStore` | class | `llama_launcher/config_store.py` | Named config persistence, CONFIGS_DIR |
 
-## CLI Commands
-| Command | Purpose |
-|---|---|
-| `run` | Launch model (background by default, `--foreground` for sync) |
-| `list-models` | Show local models (`--names-only` for just IDs) |
-| `search <query>` | Search HF for GGUF models |
-| `download <id>` | Download a GGUF model from HF |
-| `ps` | List running servers (`--json` for JSON output) |
-| `server-status` | Check single server health |
-| `server-metrics` | Fetch live token throughput metrics |
-| `stop` | Stop a background server |
-| `logs` | Tail server log file (`-f` to follow) |
-| `arena` | Benchmark models head-to-head |
-| `model-cards <id>` | Show HF README.md params for recommended settings |
-| `save-config` / `load-config` / `list-configs` | Named config profiles |
-| `daemon start/stop/status` | Systemd service generation and management |
+## CONVENTIONS
+- **Config priority:** CLI args > env vars > `config.yaml` > hardcoded defaults
+- **Logging:** stdlib `logging` (NOT structlog) — 3 verbosity levels (0=errors, 1=info, 2=debug), JSON formatter
+- **Exception hierarchy:** LlamaLauncherError → ConfigurationError, TransientProcessError, PermanentExecutionError
+- **Python:** 3.10+, type hints, Pydantic for config validation
+- **UI:** React Router v6 with lazy-loaded routes + `Loader2` spinner
+- **Error boundaries:** Each route individually wrapped in `<ErrorBoundary>`
+- **Path aliases:** 8 aliases (`@components`, `@modules`, `@services`, `@state`, `@utils`, `@hooks`, `@styles`, `@`)
+- **Dark mode:** class-based (`darkMode: 'class'` in Tailwind)
+- **Toast notifications:** use `sonner` (not `react-hot-toast`)
+- **React Query:** staleTime=60s, retry=2
+- **Process management:** PID files in `~/.llama_launcher/pids/`, configs in `~/.llama_launcher/configs/`
+- **LLM attribute naming:** Python `temperature` → CLI `temp` (mapped in `_ATTR_MAP`)
+- **Executable discovery:** llama-server → llama-cli → llama.cpp/main → main → llama_cpp_server
+- **Tests:** All test files use `unittest.TestCase` despite `pyproject.toml` listing pytest; E2E via Playwright
+- **WS reconnect:** exponential backoff, baseDelay=1s, maxRetries=10, cap=30s
+- **ESLint:** `no-explicit-any`=warn, `no-unused-vars`=error (`_` prefix allowed)
+- **Prettier:** semi=true, singleQuote=false, trailingComma=all, printWidth=100, arrowParens=always
+- **TypeScript:** strict, noUnusedLocals, noUnusedParameters, noFallthroughCasesInSwitch
 
-## Rules
-- Never suppress type errors with `as any` or `@ts-ignore` (N/A in Python, but: never use `type: ignore` to hide real errors)
-- Port comes from config by default; CLI `--port` overrides
-- All subprocess calls should handle FileNotFoundError gracefully
-- Keep changes minimal and focused — one task per commit
+## ANTI-PATTERNS
+- **`requirements.txt` is out of sync** with `pyproject.toml` — use `pyproject.toml` as source of truth
+- **`ui/dist/` committed to git** — should be in `.gitignore`
+- **`.history/`, `.omc/`, `.sisyphus/`** — AI IDE artifacts, do not edit
+- **`{app,modules/`** — broken directory name with literal curly braces (artifact in `ui/src/`)
+- **Config tri-source** — never hardcode values; all runtime config flows through `LlamaConfig`
+- **Port config** — server port from `config.yaml` (`server_port`), not hardcoded
+- **`structlog` in requirements.txt but unused** — code uses stdlib `logging` exclusively
+- **`react-hot-toast` claimed in docs but code uses `sonner`** — documentation drift
+- **Test framework inconsistency** — pyproject.toml lists pytest, but all tests use unittest
+- **Config path mismatch** — `config.yaml` includes `~/models` in search paths but Python defaults don't
+
+## COMMANDS
+```bash
+# Install
+pip install -e .
+
+# Run CLI
+llama-launcher run --model-path ./models
+
+# Run tests
+pytest tests/
+
+# Frontend dev server
+cd ui && npm run dev
+
+# Frontend build
+cd ui && npm run build
+
+# Frontend tests
+cd ui && npm run test
+
+# E2E tests
+cd ui && npm run test:e2e
+```
+
+## NOTES
+- Entry point defined in `pyproject.toml`: `llama-launcher = "llama_launcher.cli:cli"`
+- Model search paths configured in `config.yaml` (`model_search_paths`)
+- GPU acceleration controlled by `n_gpu_layers` in config (set to -1 for all layers)
+- `prompt` file (no extension) and `llama-launcher` wrapper (no extension) are raw artifacts
+- `SOUL.md` at project root must be loaded at start of every AI task session

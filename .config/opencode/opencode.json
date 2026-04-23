@@ -15,6 +15,42 @@
       }
     }
   },
+  "mcp": {
+    "sequential-thinking": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "enabled": true,
+      "timeout": 5000
+    },
+    "mcp-tools-py": {
+      "type": "local",
+      "command": [
+        "/home/b/.local/bin/mcp-tools-py",
+        "--project-dir",
+        "/home/b/git/llama-launcher",
+        "--venv-path",
+        "/home/b/git/llama-launcher/.venv"
+      ],
+      "enabled": true,
+      "timeout": 10000
+    },
+    "prompt-quality": {
+      "type": "local",
+      "command": ["mcp-prompt-quality"],
+      "enabled": true
+    },
+    "mcp-shell-tools": {
+      "type": "local",
+      "command": [
+        "mcp-shell-tools"
+      ],
+      "enabled": true
+    }
+  },
   "plugin": [
     "oh-my-openagent@latest",
     "opencode-mem"
