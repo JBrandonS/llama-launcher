@@ -1,0 +1,567 @@
+# UI TODO Plan (deep-dive, implementation-grade)
+
+Base UI reference: https://github.com/oobabooga/textgen  
+Comparable patterns to follow: Portainer (container operations), Grafana (metrics dashboards), Kubernetes Dashboard (multi-instance controls), Sentry (event streams), and GitHub Actions UI (job state transitions and action feedback).
+
+## Product contract
+- The UI manages multiple inference servers and one auto-launch daemon.
+- The UI exposes operational controls, logs, metrics, and launch parameter management.
+- The UI does not include chat interaction features.
+- The UI supports desktop, tablet, and mobile layouts with complete keyboard support.
+- The UI uses deterministic action feedback for every mutation (start, stop, restart, save).
+
+## Chosen stack
+- React 19 + TypeScript + Vite
+- TanStack Query for data fetching/caching/invalidation
+- TanStack Router or React Router v6.4+ data routes
+- WebSocket primary realtime transport with SSE fallback
+- Zod for runtime schema validation
+- React Hook Form for dynamic launch parameter forms
+- Recharts or ECharts for charts
+- Component system: shadcn/ui (Radix primitives + Tailwind)
+- Testing: Vitest + Testing Library + Playwright
+
+## Canonical frontend structure
+```txt
+src/
+  app/
+    AppShell.tsx
+    router.tsx
+  modules/
+    dashboard/
+    servers/
+    daemon/
+    settings/
+    logs/
+    metrics/
+  services/
+    api/
+    realtime/
+    errors/
+  state/
+    queryClient.ts
+    uiStore.ts
+  components/
+    common/
+    tables/
+    forms/
+    charts/
+  styles/
+    tokens.css
+```
+
+## Detailed TODO backlog
+
+### A) Foundations
+
+- [ ] A1. Initialize UI app (React+TS+Vite), linting, formatting, and env configuration.
+  - Deliverables:
+    - Vite app with strict TS config and path aliases.
+    - ESLint + TypeScript rules + import order + no-floating-promises.
+    - Prettier with consistent print width and line endings.
+    - `.env.example` with backend base URL, WS URL, polling intervals.
+  - Implementation steps:
+    - Create app scaffold.
+    - Configure tsconfig strict mode and `@/*` alias.
+    - Configure ESLint with React hooks and TypeScript plugin.
+    - Add scripts: `dev`, `build`, `preview`, `lint`, `test`, `test:e2e`.
+  - Pseudocode:
+```ts
+// src/config/env.ts
+import { z } from "zod";
+const EnvSchema = z.object({
+  VITE_API_BASE_URL: z.string().url(),
+  VITE_WS_URL: z.string().url(),
+  VITE_POLL_INTERVAL_MS: z.coerce.number().int().min(1000),
+});
+export const ENV = EnvSchema.parse(import.meta.env);
+```
+
+- [ ] A2. Create design tokens/theme (light/dark), spacing, typography, status colors.
+  - Deliverables:
+    - Semantic token set: `--bg`, `--fg`, `--muted`, `--success`, `--warning`, `--danger`, `--info`.
+    - Shared status badge styles for RUNNING/STOPPED/STARTING/ERROR.
+    - Global spacing scale and typography ramp.
+  - Implementation steps:
+    - Define CSS variables in `tokens.css` and dark overrides under `.dark`.
+    - Build `<StatusBadge status="RUNNING" />` component using token mappings.
+  - Pseudocode:
+```tsx
+const STATUS_COLOR: Record<ServerStatus, string> = {
+  RUNNING: "var(--success)",
+  STARTING: "var(--info)",
+  STOPPED: "var(--muted)",
+  ERROR: "var(--danger)",
+};
+```
+
+- [ ] A3. Implement app shell: sidebar nav, top bar, breadcrumb/title, mobile drawer.
+  - Deliverables:
+    - Persistent desktop sidebar + collapsible mobile drawer.
+    - Route-aware breadcrumbs and page title.
+    - Global action region for contextual actions.
+  - Implementation steps:
+    - Build `AppShell` with layout slots.
+    - Wire route metadata to breadcrumb builder.
+    - Add keyboard shortcut to open command palette.
+  - Pseudocode:
+```tsx
+function AppShell() {
+  const route = useCurrentRouteMeta();
+  return (
+    <Layout>
+      <Sidebar items={NAV_ITEMS} />
+      <Main>
+        <TopBar title={route.title} breadcrumbs={route.breadcrumbs} />
+        <Outlet />
+      </Main>
+    </Layout>
+  );
+}
+```
+
+- [ ] A4. Add routing structure (`/dashboard`, `/servers`, `/servers/:serverId`, `/daemon`, `/settings`).
+  - Deliverables:
+    - Lazy-loaded route modules.
+    - Route-level error boundaries.
+    - URL state for filters and tabs.
+  - Pseudocode:
+```ts
+createBrowserRouter([
+  { path: "/dashboard", element: <DashboardPage />, errorElement: <RouteError /> },
+  { path: "/servers", element: <ServersPage /> },
+  { path: "/servers/:serverId", element: <ServerDetailPage /> },
+  { path: "/daemon", element: <DaemonPage /> },
+  { path: "/settings", element: <SettingsPage /> },
+]);
+```
+
+### B) API contracts and client layer
+
+- [ ] B1. Define typed API contracts for servers, logs, metrics, daemon.
+  - Deliverables:
+    - `types.ts` with DTOs and discriminated unions.
+    - Zod schemas for runtime validation.
+    - OpenAPI mapping document.
+  - Pseudocode:
+```ts
+const ServerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.enum(["RUNNING","STARTING","STOPPED","ERROR"]),
+  port: z.number().int(),
+  model: z.string(),
+  uptimeSec: z.number().int(),
+});
+type Server = z.infer<typeof ServerSchema>;
+```
+
+- [ ] B2. Build API client with centralized error mapping and retry rules.
+  - Deliverables:
+    - `apiClient.request<T>()` wrapper.
+    - Standard `AppError` model with code/category/httpStatus/userMessage.
+    - Retry policy: GET retried with backoff; mutations non-retried by default.
+  - Pseudocode:
+```ts
+async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const res = await fetch(withBase(input), withHeaders(init));
+  if (!res.ok) throw mapHttpError(res);
+  const json = await res.json();
+  return json as T;
+}
+```
+
+- [ ] B3. Add WebSocket/SSE client for realtime logs and status transitions.
+  - Deliverables:
+    - Connection manager with reconnect and heartbeat.
+    - Event parser with versioned payload shape.
+    - Query cache updaters for incremental state changes.
+  - Pseudocode:
+```ts
+socket.onmessage = (evt) => {
+  const event = parseEvent(evt.data);
+  switch (event.type) {
+    case "server.status.changed":
+      queryClient.setQueryData(["server", event.serverId], applyStatusEvent(event));
+      break;
+    case "log.line":
+      appendLogLine(event.serverId, event.line);
+      break;
+  }
+};
+```
+
+- [ ] B4. Implement optimistic updates for safe lifecycle actions with reconciliation.
+  - Deliverables:
+    - Pending state badges during start/stop/restart.
+    - Rollback on mutation failure.
+    - Post-mutation invalidation for authoritative backend state.
+  - Pseudocode:
+```ts
+const startMutation = useMutation({
+  mutationFn: startServer,
+  onMutate: async ({ serverId }) => {
+    const prev = queryClient.getQueryData(["server", serverId]);
+    queryClient.setQueryData(["server", serverId], markStarting(prev));
+    return { prev };
+  },
+  onError: (_err, vars, ctx) => queryClient.setQueryData(["server", vars.serverId], ctx?.prev),
+  onSettled: (_d, _e, vars) => queryClient.invalidateQueries({ queryKey: ["server", vars.serverId] }),
+});
+```
+
+### C) Server management UX
+
+- [ ] C1. Build server list page (table, filters, sorting, bulk actions).
+  - Deliverables:
+    - Virtualized table for large fleet sizes.
+    - Debounced search and persisted filters in URL.
+    - Bulk action toolbar with explicit confirmation.
+  - Pseudocode:
+```tsx
+const [filters, setFilters] = useUrlFilters();
+const { data } = useServersQuery(filters);
+return <ServerTable rows={data.items} onSort={setSort} onBulkStop={bulkStop} />;
+```
+
+- [ ] C2. Build server detail page (overview, controls, logs, metrics, config).
+  - Deliverables:
+    - Tabs: Overview / Controls / Logs / Metrics / Config.
+    - Sticky action bar with status and lifecycle buttons.
+    - Independent loading and error boundaries per tab panel.
+  - Pseudocode:
+```tsx
+<Tabs value={tab} onValueChange={setTab}>
+  <Tab value="overview"><OverviewPanel /></Tab>
+  <Tab value="logs"><LogsPanel serverId={id} /></Tab>
+  <Tab value="metrics"><MetricsPanel serverId={id} /></Tab>
+</Tabs>
+```
+
+- [ ] C3. Add create/edit server flow with validation and preset templates.
+  - Deliverables:
+    - Multi-step form: identity -> model -> runtime -> networking -> review.
+    - Preset profiles: low-memory, balanced, high-throughput.
+    - Duplicate-safe naming and reserved-port detection.
+  - Pseudocode:
+```ts
+const FormSchema = z.object({
+  name: z.string().min(3),
+  port: z.number().int().min(1024).max(65535),
+  modelPath: z.string().min(1),
+});
+```
+
+### D) textgen option parity (user-friendly parameter editor)
+
+- [ ] D1. Create parameter parity matrix mapping textgen options to UI fields.
+  - Deliverables:
+    - Source-of-truth table: CLI flag, type, default, UI label, section, help, validation.
+    - Automated check to detect missing mappings.
+  - Pseudocode:
+```ts
+type OptionMap = {
+  cliFlag: string;
+  uiKey: string;
+  section: "network" | "model" | "performance" | "generation" | "security" | "logging";
+  inputType: "text" | "number" | "select" | "switch";
+  defaultValue: unknown;
+};
+```
+
+- [ ] D2. Group options into intuitive sections with progressive disclosure.
+  - Deliverables:
+    - Basic mode: top 20 operationally critical options.
+    - Advanced mode: complete parity set.
+    - Collapsible section panels with descriptions.
+  - Pseudocode:
+```tsx
+const visibleOptions = mode === "basic"
+  ? allOptions.filter(o => o.basic === true)
+  : allOptions;
+```
+
+- [ ] D3. Implement advanced form behaviors and dependency rules.
+  - Deliverables:
+    - Live validation summaries.
+    - Dependency gating (option B requires option A enabled).
+    - Reset-to-default per section and full form.
+  - Pseudocode:
+```ts
+function validateDependencies(values: LaunchFormValues): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (values.useGpu === true && values.gpuLayers <= 0) {
+    issues.push({ field: "gpuLayers", message: "GPU layers must be > 0 when GPU is enabled." });
+  }
+  return issues;
+}
+```
+
+- [ ] D4. Add import/export for CLI equivalence and migration.
+  - Deliverables:
+    - `Export as CLI` button with copy-to-clipboard and diff preview.
+    - `Import CLI` parser with error line highlighting.
+  - Pseudocode:
+```ts
+function toCliArgs(values: LaunchFormValues): string[] {
+  return OPTION_MATRIX.flatMap((m) => serializeOption(m, values[m.uiKey]));
+}
+function fromCliArgs(input: string): LaunchFormValues {
+  const tokens = shellSplit(input);
+  return parseTokensWithMatrix(tokens, OPTION_MATRIX);
+}
+```
+
+### E) Dashboard and observability
+
+- [ ] E1. Build dashboard summary cards and trend charts.
+  - Deliverables:
+    - Cards: total servers, running, errored, pending actions.
+    - Sparklines for 1h/24h trend windows.
+  - Pseudocode:
+```tsx
+const summary = deriveFleetSummary(servers);
+return <SummaryGrid cards={summaryCards(summary)} />;
+```
+
+- [ ] E2. Add server status timeline/events feed.
+  - Deliverables:
+    - Unified event feed from daemon + servers.
+    - Event grouping by server and severity.
+    - Infinite scrolling with cursor pagination.
+  - Pseudocode:
+```ts
+useInfiniteQuery({
+  queryKey: ["events", filters],
+  queryFn: ({ pageParam }) => api.events.list({ cursor: pageParam, ...filters }),
+  getNextPageParam: (last) => last.nextCursor,
+});
+```
+
+- [ ] E3. Add metrics widgets for host and per-server health.
+  - Deliverables:
+    - Host panels: CPU, memory, disk I/O, network in/out.
+    - Server panels: CPU, memory, req/sec, latency p95, error rate.
+    - Unified time-range selector with synchronized chart cursors.
+  - Pseudocode:
+```ts
+const range = useDashboardTimeRange(); // 5m, 1h, 24h
+const hostMetrics = useHostMetrics(range);
+const serverMetrics = useServerMetrics(selectedServerIds, range);
+```
+
+- [ ] E4. Add log explorer (tail/follow, filters, aggregated views).
+  - Deliverables:
+    - Live tail mode with pause/resume.
+    - Severity filters and server selectors.
+    - ANSI-safe rendering and line virtualization.
+  - Pseudocode:
+```tsx
+const visibleLines = applyLogFilters(lines, { severity, query, serverIds });
+return <VirtualizedLogList lines={visibleLines} follow={followMode} />;
+```
+
+### F) Daemon management
+
+- [ ] F1. Build daemon status card (state, PID, uptime, restart count, last error).
+  - Deliverables:
+    - Real-time status indicator with stale-data marker.
+    - Health badge (healthy/degraded/unhealthy) derived from heartbeat lag.
+  - Pseudocode:
+```ts
+const health = heartbeatLagMs < 5000 ? "healthy" : heartbeatLagMs < 15000 ? "degraded" : "unhealthy";
+```
+
+- [ ] F2. Add daemon controls (start/stop/restart) with guarded confirmations.
+  - Deliverables:
+    - Confirmation modal for stop/restart with impact statement.
+    - Disabled states when daemon transition is active.
+  - Pseudocode:
+```ts
+async function onRestartDaemon() {
+  await confirmDialog("Restart daemon", "This interrupts orchestration briefly.");
+  await daemonMutation.restart();
+}
+```
+
+- [ ] F3. Add daemon logs and heartbeat/health panel.
+  - Deliverables:
+    - Daemon-only log stream with level filter.
+    - Heartbeat chart and dropped-heartbeat counters.
+  - Pseudocode:
+```ts
+const hbSeries = useDaemonHeartbeatSeries("15m");
+const logLines = useDaemonLogs({ follow: true, level });
+```
+
+- [ ] F4. Add auto-launch policy manager.
+  - Deliverables:
+    - Per-server autostart toggle.
+    - Startup order list with drag-and-drop.
+    - Retry policy editor (max retries, backoff base, max delay).
+  - Pseudocode:
+```ts
+type RetryPolicy = { maxRetries: number; backoffBaseMs: number; maxDelayMs: number; };
+```
+
+### G) UX quality: feedback, errors, responsiveness
+
+- [ ] G1. Standardize action feedback patterns.
+  - Deliverables:
+    - Mutation lifecycle toasts: pending/success/error.
+    - Inline error summaries for form sections.
+    - Button state policy: disabled during in-flight mutation.
+  - Pseudocode:
+```ts
+toast.promise(startMutation.mutateAsync({ serverId }), {
+  loading: "Starting server...",
+  success: "Server start requested.",
+  error: (e) => toUserMessage(e),
+});
+```
+
+- [ ] G2. Add robust failure states.
+  - Deliverables:
+    - Dedicated empty/error components per module.
+    - Retry buttons with bounded retry count.
+    - Conflict resolution UI for stale state actions.
+  - Pseudocode:
+```tsx
+if (query.isError) return <ErrorState onRetry={query.refetch} details={formatError(query.error)} />;
+```
+
+- [ ] G3. Ensure responsive behavior on mobile/tablet/desktop.
+  - Deliverables:
+    - Mobile-first breakpoints with compact table cards.
+    - Split-pane detail view on desktop.
+    - Touch-safe controls and hit targets.
+  - Pseudocode:
+```ts
+const isMobile = useMediaQuery("(max-width: 768px)");
+return isMobile ? <ServerCardList /> : <ServerDataGrid />;
+```
+
+- [ ] G4. Implement accessibility baseline.
+  - Deliverables:
+    - WCAG AA color contrast for all states.
+    - Full keyboard traversal and focus trap in dialogs.
+    - ARIA labels for dynamic status controls.
+  - Pseudocode:
+```tsx
+<button aria-label={`Start server ${server.name}`} aria-disabled={isStarting}>
+  Start
+</button>
+```
+
+### H) Security and operational safeguards
+
+- [ ] H1. Add role-aware UI gates.
+  - Deliverables:
+    - Permission model in frontend (`viewer`, `operator`, `admin`).
+    - Action-level guards for restart/stop/delete/config-update.
+  - Pseudocode:
+```ts
+const canStop = hasPermission(user, "server.stop");
+```
+
+- [ ] H2. Sanitize and safely render logs.
+  - Deliverables:
+    - Escape HTML entities in all log lines.
+    - Strip unsafe ANSI sequences.
+    - Truncate extremely long single lines with expand toggle.
+  - Pseudocode:
+```ts
+const safeLine = escapeHtml(stripAnsiUnsafe(rawLine));
+```
+
+- [ ] H3. Confirm destructive actions with impact text.
+  - Deliverables:
+    - Confirm dialogs include exact target name.
+    - Required text acknowledgment for high-impact operations.
+  - Pseudocode:
+```ts
+await requireTypedConfirmation(`Type ${server.name} to stop this server`, server.name);
+```
+
+- [ ] H4. Add operator audit/event trail surface.
+  - Deliverables:
+    - Action log with actor, action, target, timestamp, result.
+    - Filter by actor/server/action type.
+  - Pseudocode:
+```ts
+type AuditEvent = { actor: string; action: string; target: string; ts: string; result: "success"|"failure"; };
+```
+
+### I) Test and release readiness
+
+- [ ] I1. Component tests for forms, status badges, and action flows.
+  - Deliverables:
+    - Validation tests for launch parameter editor.
+    - Rendering tests for status badges and transitions.
+  - Pseudocode:
+```ts
+it("shows error when port is out of range", async () => {
+  render(<ServerForm />);
+  await user.type(screen.getByLabelText(/port/i), "70000");
+  await user.click(screen.getByRole("button", { name: /save/i }));
+  expect(screen.getByText(/must be between 1024 and 65535/i)).toBeInTheDocument();
+});
+```
+
+- [ ] I2. Integration tests for server lifecycle and daemon controls.
+  - Deliverables:
+    - Mock API integration tests with real query client.
+    - Mutation + cache reconciliation assertions.
+  - Pseudocode:
+```ts
+it("reconciles status after optimistic start", async () => {
+  mockStartServerSuccess();
+  render(<ServerControls serverId="s1" />);
+  await user.click(screen.getByRole("button", { name: /start/i }));
+  await waitFor(() => expect(screen.getByText(/running/i)).toBeInTheDocument());
+});
+```
+
+- [ ] I3. E2E smoke tests (critical paths).
+  - Deliverables:
+    - Create server -> start -> view logs -> stop.
+    - Daemon start/stop/status sequence.
+    - Dashboard renders mixed state fleet.
+  - Pseudocode:
+```ts
+test("operator can run full server lifecycle", async ({ page }) => {
+  await page.goto("/servers");
+  await createServer(page, { name: "qa-server-1" });
+  await startServer(page, "qa-server-1");
+  await expectLogsToStream(page, "qa-server-1");
+  await stopServer(page, "qa-server-1");
+});
+```
+
+- [ ] I4. Performance pass for logs and charts under load.
+  - Deliverables:
+    - Log rendering remains smooth at 10k+ visible lines via virtualization.
+    - Chart updates remain stable at 1s refresh intervals.
+    - Memory profile free of unbounded growth from retained events.
+  - Pseudocode:
+```ts
+for (let i = 0; i < 10000; i++) pushLogLine(makeSyntheticLog(i));
+measureFrameRate();
+assert(frameRate >= 45);
+```
+
+## Delivery phases with strict gates
+1. Foundation and routing complete with static pages and navigation.
+2. API contracts and query layer complete with mocked backend.
+3. Server management pages complete with lifecycle controls.
+4. Parameter parity editor complete with CLI import/export.
+5. Dashboard, logs, metrics, and daemon management complete.
+6. Hardening complete: accessibility, security, and tests.
+7. Release candidate complete with smoke tests and performance thresholds.
+
+## Definition of done
+- Every mutation path has clear pending, success, and error feedback.
+- Every page has loading, empty, and error states.
+- Every textgen launch option in scope is mapped and test-covered.
+- Logs and metrics streams recover from disconnects automatically.
+- Daemon controls and policy management are fully functional from UI.
