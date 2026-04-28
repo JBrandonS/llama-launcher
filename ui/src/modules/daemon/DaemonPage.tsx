@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Badge } from '@components/common/Badge';
 import { apiService } from '@services/apiService';
+import { wsService } from '@services/wsService';
+import type { LogEntry } from '@services/types';
 import {
   Loader2,
   Play,
@@ -11,6 +14,12 @@ import {
   AlertTriangle,
   Activity,
   Clock,
+  ChevronDown,
+  ChevronUp,
+  Terminal,
+  Info,
+  AlertOctagon,
+  CheckCircle,
 } from 'lucide-react';
 import { cn } from '@utils/cn';
 
@@ -20,10 +29,48 @@ function formatUptime(seconds: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
+
+const DAEMON_LEVEL_CONFIG: Record<LogLevel, { icon: typeof Info; color: string }> = {
+  DEBUG: { icon: Info, color: 'text-muted-foreground' },
+  INFO: { icon: CheckCircle, color: 'text-blue-500 dark:text-blue-400' },
+  WARNING: { icon: AlertTriangle, color: 'text-amber-500 dark:text-amber-400' },
+  ERROR: { icon: AlertOctagon, color: 'text-red-500 dark:text-red-400' },
+  CRITICAL: { icon: AlertOctagon, color: 'text-red-600 dark:text-red-500' },
+};
+
+function formatTimestamp(ts: string): string {
+  try {
+    const d = new Date(ts);
+    const base = d.toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    const ms = String(d.getMilliseconds()).padStart(3, '0');
+    return `${base}.${ms}`;
+  } catch {
+    return ts;
+  }
+}
+
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 export function DaemonPage() {
   const queryClient = useQueryClient();
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [showLogViewer, setShowLogViewer] = useState(false);
+  const [daemonFollowMode, setDaemonFollowMode] = useState(false);
+  const [daemonVisibleCount, setDaemonVisibleCount] = useState(100);
+  const [daemonSearch, setDaemonSearch] = useState('');
+
+  const logContainerRef = useRef<HTMLDivElement>(null);
 
   const { data: daemon, isLoading } = useQuery({
     queryKey: ['daemon'],
@@ -34,16 +81,87 @@ export function DaemonPage() {
   const startMutation = useMutation({
     mutationFn: apiService.startDaemon,
     onMutate: () => setIsStarting(true),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['daemon'] }),
+    onSuccess: () => {
+      toast.success('Daemon started');
+      queryClient.invalidateQueries({ queryKey: ['daemon'] });
+    },
+    onError: () => toast.error('Failed to start daemon'),
     onSettled: () => setIsStarting(false),
   });
 
   const stopMutation = useMutation({
     mutationFn: apiService.stopDaemon,
     onMutate: () => setIsStopping(true),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['daemon'] }),
+    onSuccess: () => {
+      toast.success('Daemon stopped');
+      queryClient.invalidateQueries({ queryKey: ['daemon'] });
+    },
+    onError: () => toast.error('Failed to stop daemon'),
     onSettled: () => setIsStopping(false),
   });
+
+  const configMutation = useMutation({
+    mutationFn: apiService.updateDaemonConfig,
+    onSuccess: () => {
+      toast.success('Settings updated');
+      queryClient.invalidateQueries({ queryKey: ['daemon'] });
+    },
+    onError: () => toast.error('Failed to update settings'),
+  });
+
+  const { data: daemonLogsData, isLoading: logsLoading } = useQuery({
+    queryKey: ['daemon-logs', daemonVisibleCount],
+    queryFn: () => apiService.getDaemonLogs(daemonVisibleCount),
+    refetchInterval: daemonFollowMode ? 2000 : undefined,
+    enabled: showLogViewer,
+  });
+
+  const daemonLogEntries: LogEntry[] = (daemonLogsData?.entries ?? []).map((e) =>
+    e.component === undefined ? { ...e, component: 'daemon' } : e
+  );
+
+  useEffect(() => {
+    if (!daemonFollowMode || !showLogViewer) return;
+
+    const sub = wsService.subscribeToLogs('__daemon__', (entry: LogEntry) => {
+      queryClient.setQueryData(['daemon-logs-incoming'], (old: LogEntry[] = []) => [...old, entry]);
+    });
+
+    return () => sub?.();
+  }, [daemonFollowMode, showLogViewer]);
+
+  const allDaemonLogEntries: LogEntry[] = [
+    ...daemonLogEntries,
+    ...(daemonFollowMode
+      ? (queryClient.getQueryData(['daemon-logs-incoming']) as LogEntry[] | undefined) ?? []
+      : []),
+  ];
+
+  const filteredDaemonLogs = allDaemonLogEntries.filter((entry) => {
+    if (daemonSearch) {
+      const q = daemonSearch.toLowerCase();
+      return (
+        entry.message.toLowerCase().includes(q) ||
+        entry.component?.toLowerCase().includes(q) ||
+        entry.level.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    if (daemonFollowMode && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [daemonLogEntries.length, daemonFollowMode]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -63,11 +181,7 @@ export function DaemonPage() {
         </button>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </div>
-      ) : daemon ? (
+      {daemon != null ? (
         <>
           <div className="rounded-lg border bg-card p-6 shadow-sm">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -111,7 +225,11 @@ export function DaemonPage() {
                   {isStarting ? 'Starting...' : 'Start'}
                 </button>
                 <button
-                  onClick={() => stopMutation.mutate()}
+                  onClick={() => {
+                    if (window.confirm('Stop the auto-launch daemon? Server launches will no longer be managed automatically.')) {
+                      stopMutation.mutate();
+                    }
+                  }}
                   disabled={daemon.status !== 'running' || isStopping}
                   className={cn(
                     'inline-flex items-center gap-2 rounded-md border border-destructive/30 px-4 py-2 text-sm text-destructive hover:bg-destructive/10',
@@ -197,25 +315,213 @@ export function DaemonPage() {
               <div className="border-b bg-muted/30 px-4 py-3">
                 <h3 className="flex items-center gap-2 font-medium">
                   <Settings className="h-4 w-4" />
-                  Configuration
+                  Auto-Launch Policy
                 </h3>
               </div>
-              <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-                {[
-                  ['Poll Interval', `${daemon.config.pollIntervalSeconds}s`],
-                  ['Auto-Start', daemon.config.autoLaunchOnStart ? 'Enabled' : 'Disabled'],
-                  ['Max Attempts', String(daemon.config.maxLaunchAttempts ?? 5)],
-                  ['Retry Delay', `${daemon.config.retryDelaySeconds}s`],
-                  ['Health Check', `${daemon.config.healthCheckInterval}s`],
-                ].map(([label, value]) => (
-                  <div key={label} className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{label}</span>
-                    <span className="font-mono">{value}</span>
-                  </div>
-                ))}
+              <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm text-muted-foreground">Auto-Start on Daemon Launch</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      configMutation.mutate({
+                        autoLaunchOnStart: !daemon.config!.autoLaunchOnStart,
+                      });
+                    }}
+                    className={cn(
+                      'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                      daemon.config!.autoLaunchOnStart ? 'bg-primary' : 'bg-muted'
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'inline-block h-4 w-4 transform rounded-full bg-background transition-transform',
+                        daemon.config!.autoLaunchOnStart && 'translate-x-6'
+                      )}
+                    />
+                  </button>
+                </label>
+
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="pollInterval" className="text-sm text-muted-foreground">Poll Interval (seconds)</label>
+                  <input
+                    id="pollInterval"
+                    type="number"
+                    min={1}
+                    max={120}
+                    defaultValue={daemon.config!.pollIntervalSeconds ?? 10}
+                    onBlur={(e) =>
+                      configMutation.mutate({ pollIntervalSeconds: Math.max(1, Math.min(120, Number(e.target.value))) })
+                    }
+                    className="h-9 w-full rounded-md border bg-background px-2.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="maxAttempts" className="text-sm text-muted-foreground">Max Launch Attempts</label>
+                  <input
+                    id="maxAttempts"
+                    type="number"
+                    min={1}
+                    max={20}
+                    defaultValue={daemon.config!.maxLaunchAttempts ?? 5}
+                    onBlur={(e) =>
+                      configMutation.mutate({ maxLaunchAttempts: Math.max(1, Math.min(20, Number(e.target.value))) })
+                    }
+                    className="h-9 w-full rounded-md border bg-background px-2.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="retryDelay" className="text-sm text-muted-foreground">Retry Delay (seconds)</label>
+                  <input
+                    id="retryDelay"
+                    type="number"
+                    min={1}
+                    max={60}
+                    defaultValue={daemon.config!.retryDelaySeconds ?? 5}
+                    onBlur={(e) =>
+                      configMutation.mutate({ retryDelaySeconds: Math.max(1, Math.min(60, Number(e.target.value))) })
+                    }
+                    className="h-9 w-full rounded-md border bg-background px-2.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="healthCheck" className="text-sm text-muted-foreground">Health Check (seconds)</label>
+                  <input
+                    id="healthCheck"
+                    type="number"
+                    min={1}
+                    max={30}
+                    defaultValue={daemon.config!.healthCheckInterval ?? 5}
+                    onBlur={(e) =>
+                      configMutation.mutate({ healthCheckInterval: Math.max(1, Math.min(30, Number(e.target.value))) })
+                    }
+                    className="h-9 w-full rounded-md border bg-background px-2.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
               </div>
             </div>
           )}
+
+          <div className="rounded-lg border bg-card shadow-sm">
+            <button
+              type="button"
+              onClick={() => setShowLogViewer((v) => !v)}
+              className="flex w-full items-center justify-between border-b bg-muted/30 px-4 py-3 text-left"
+            >
+              <h3 className="flex items-center gap-2 font-medium">
+                <Terminal className="h-4 w-4" />
+                Daemon Logs
+                {daemonLogsData?.entries && daemonLogsData.entries.length > 0 && (
+                  <Badge variant="neutral" className="ml-2">{daemonLogsData.entries.length}</Badge>
+                )}
+              </h3>
+              {showLogViewer ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+
+            {showLogViewer && (
+              <div className="p-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDaemonFollowMode((v) => !v);
+                      setDaemonVisibleCount(100);
+                    }}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs',
+                      daemonFollowMode
+                        ? 'bg-primary text-primary-foreground'
+                        : 'border bg-background hover:bg-accent'
+                    )}
+                  >
+                    {daemonFollowMode ? (
+                      <CheckCircle className="h-3 w-3" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3" />
+                    )}
+                    {daemonFollowMode ? 'Tail ON' : 'Tail OFF'}
+                  </button>
+                  <input
+                    type="text"
+                    placeholder="Search logs…"
+                    value={daemonSearch}
+                    onChange={(e) => setDaemonSearch(e.target.value)}
+                    className="h-8 flex-1 min-w-32 rounded-md border bg-background px-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setDaemonVisibleCount((c) => c + 100)}
+                    className="rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent"
+                  >
+                    Load More
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => queryClient.invalidateQueries({ queryKey: ['daemon-logs'] })}
+                    className="rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {logsLoading ? (
+                  <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Loading logs…
+                  </div>
+                ) : filteredDaemonLogs.length === 0 ? (
+                  <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+                    <Clock className="mr-2 h-4 w-4" />
+                    No logs to display
+                  </div>
+                ) : (
+                  <div
+                    ref={logContainerRef}
+                    className="max-h-96 overflow-y-auto rounded-md border bg-muted/30 font-mono text-xs"
+                  >
+                    {filteredDaemonLogs.map((entry, i) => {
+                      const lc = DAEMON_LEVEL_CONFIG[entry.level as LogLevel];
+                      const Icon = lc.icon;
+                      return (
+                        <div
+                          key={i}
+                          className={cn(
+                            'flex items-start gap-2 border-b border-muted/50 px-3 py-1.5 last:border-b-0',
+                            entry.level === 'ERROR' || entry.level === 'CRITICAL' ? 'bg-destructive/5' : ''
+                          )}
+                        >
+                          <Icon className={cn('mt-0.5 h-3 w-3 flex-shrink-0', lc.color)} />
+                          <span className="text-muted-foreground flex-shrink-0">
+                            {formatTimestamp(entry.timestamp)}
+                          </span>
+                          <span className="flex-shrink-0 font-semibold text-muted-foreground">
+                            [{entry.component ?? 'daemon'}]
+                          </span>
+                          <span
+                            className={cn('flex-1 break-all', lc.color)}
+                            dangerouslySetInnerHTML={{
+                              __html: daemonSearch
+                                ? escapeHtml(entry.message).replace(
+                                    new RegExp(
+                                      `(${daemonSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`,
+                                      'gi'
+                                    ),
+                                    '<mark class="bg-amber-200/30 text-inherit px-0.5 rounded">$1</mark>'
+                                  )
+                                : escapeHtml(entry.message),
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </>
       ) : (
         <div className="rounded-lg border bg-card p-8 text-center text-muted-foreground">

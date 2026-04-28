@@ -1,23 +1,20 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useParams, Link } from 'react-router-dom';
 import { Badge } from '@components/common/Badge';
 import { apiService } from '@services/apiService';
-import type { ServerInfo, GPUInfo } from '@services/types';
 import {
   Loader2,
-  Play,
   Square,
   RefreshCw,
   ArrowLeft,
   Cpu,
-  Network,
   Clock,
   Server,
   Zap,
-  Thermometer,
-  Gauge,
-  HardDrive,
+  Rocket,
+  Key,
 } from 'lucide-react';
 import { cn } from '@utils/cn';
 
@@ -69,6 +66,39 @@ export function ServerDetailPage() {
   const [isStopping, setIsStopping] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
 
+  // Always call hooks first — guard via conditional rendering below
+  const { data: server, isLoading, error } = useQuery({
+    queryKey: ['server', serverId ?? ''],
+    queryFn: () => apiService.getServer(serverId!),
+    refetchInterval: 5000,
+    enabled: !!serverId,
+  });
+
+  const stopMutation = useMutation({
+    mutationFn: () => apiService.stopServer(serverId!),
+    onMutate: () => setIsStopping(true),
+    onSuccess: () => {
+      toast.success('Server stopped');
+      queryClient.invalidateQueries({ queryKey: ['server', serverId!] });
+      queryClient.invalidateQueries({ queryKey: ['servers'] });
+    },
+    onError: () => toast.error('Failed to stop server'),
+    onSettled: () => setIsStopping(false),
+  });
+
+  const restartMutation = useMutation({
+    mutationFn: () => apiService.restartServer(serverId!),
+    onMutate: () => setIsRestarting(true),
+    onSuccess: () => {
+      toast.success('Server restarting');
+      queryClient.invalidateQueries({ queryKey: ['server', serverId!] });
+      queryClient.invalidateQueries({ queryKey: ['servers'] });
+    },
+    onError: () => toast.error('Failed to restart server'),
+    onSettled: () => setIsRestarting(false),
+  });
+
+  // Guard: no serverId in URL
   if (!serverId) {
     return (
       <div className="space-y-4">
@@ -84,32 +114,6 @@ export function ServerDetailPage() {
       </div>
     );
   }
-
-  const { data: server, isLoading, error } = useQuery({
-    queryKey: ['server', serverId],
-    queryFn: () => apiService.getServer(serverId),
-    refetchInterval: 5000,
-  });
-
-  const stopMutation = useMutation({
-    mutationFn: () => apiService.stopServer(serverId),
-    onMutate: () => setIsStopping(true),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['server', serverId] });
-      queryClient.invalidateQueries({ queryKey: ['servers'] });
-    },
-    onSettled: () => setIsStopping(false),
-  });
-
-  const restartMutation = useMutation({
-    mutationFn: () => apiService.restartServer(serverId),
-    onMutate: () => setIsRestarting(true),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['server', serverId] });
-      queryClient.invalidateQueries({ queryKey: ['servers'] });
-    },
-    onSettled: () => setIsRestarting(false),
-  });
 
   return (
     <div className="space-y-6">
@@ -159,7 +163,6 @@ export function ServerDetailPage() {
 
       {server && !isLoading && (
         <>
- 
           <div className="rounded-lg border bg-card p-6 shadow-sm">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-4">
@@ -174,7 +177,11 @@ export function ServerDetailPage() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => restartMutation.mutate()}
+                  onClick={() => {
+                    if (window.confirm(`Restart ${server.name || serverId}? The server will be temporarily unavailable.`)) {
+                      restartMutation.mutate();
+                    }
+                  }}
                   disabled={server.status !== 'running' || isRestarting}
                   className={cn(
                     'inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent',
@@ -189,7 +196,11 @@ export function ServerDetailPage() {
                   Restart
                 </button>
                 <button
-                  onClick={() => stopMutation.mutate()}
+                  onClick={() => {
+                    if (window.confirm(`Stop ${server.name || serverId}? This action will terminate the server process.`)) {
+                      stopMutation.mutate();
+                    }
+                  }}
                   disabled={server.status !== 'running' || isStopping}
                   className={cn(
                     'inline-flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-2 text-sm text-destructive hover:bg-destructive/10',
@@ -233,10 +244,12 @@ export function ServerDetailPage() {
                         <span className="text-muted-foreground">Memory Used</span>
                         <span>{formatBytes(server.gpuInfo.memoryUsed)}</span>
                       </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Memory Total</span>
-                        <span>{formatBytes(server.gpuInfo.memoryTotal)}</span>
-                      </div>
+                      {server.gpuInfo.memoryTotal != null && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Memory Total</span>
+                          <span>{formatBytes(server.gpuInfo.memoryTotal)}</span>
+                        </div>
+                      )}
                     </>
                   )}
                   {server.gpuInfo.utilization != null && (
@@ -325,18 +338,40 @@ export function ServerDetailPage() {
           )}
 
          {server.launchConfig && Object.keys(server.launchConfig).length > 0 && (
-            <div className="rounded-lg border bg-card shadow-sm">
-              <div className="border-b bg-muted/30 px-4 py-3">
-                <h3 className="flex items-center gap-2 font-medium">
-                  <Server className="h-4 w-4" />
-                  Launch Configuration
-                </h3>
+              <div className="rounded-lg border bg-card shadow-sm">
+                <div className="border-b bg-muted/30 px-4 py-3 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 font-medium">
+                    <Server className="h-4 w-4" />
+                    Launch Configuration
+                  </h3>
+                  <Link
+                    to={`/launch?${new URLSearchParams({
+                      model: String(server.model || ''),
+                      port: server.port != null ? String(server.port) : '',
+                    }).toString()}`}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    <Rocket className="h-3.5 w-3.5" />
+                    Launch
+                  </Link>
+                </div>
+                <div className="p-4 space-y-2">
+                  {Object.entries(server.launchConfig).map(([key, value]) => (
+                    <div key={key} className="flex justify-between text-sm">
+                      <span className="flex items-center gap-1.5 text-muted-foreground">
+                        <Key className="h-3.5 w-3.5" />
+                        {key}
+                      </span>
+                      <span className="font-mono text-foreground">
+                        {typeof value === 'object'
+                          ? JSON.stringify(value)
+                          : String(value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <pre className="p-4 text-xs text-muted-foreground overflow-x-auto">
-                {JSON.stringify(server.launchConfig, null, 2)}
-              </pre>
-            </div>
-          )}
+            )}
         </>
       )}
 

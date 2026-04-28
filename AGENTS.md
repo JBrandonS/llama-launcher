@@ -7,6 +7,8 @@
 ## OVERVIEW
 Launch and manage llama.cpp inference servers (GGUF models) via CLI + React dashboard. Python backend (click CLI, Pydantic config, stdlib logging) + React frontend (Vite 6, React Router v6 lazy routes, React Query, sonner toasts, Tailwind CSS). Server defaults to port **12345**.
 
+Read the SOUL.md to initialize agents.
+
 ## STRUCTURE
 ```
 llama-launcher/

@@ -10,9 +10,11 @@ import { NotFoundPage } from '@components/common/NotFoundPage';
 const DashboardPage = lazy(() => import('@modules/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
 const ServersPage = lazy(() => import('@modules/servers/ServersPage').then(m => ({ default: m.ServersPage })));
 const ServerDetailPage = lazy(() => import('@modules/servers/ServerDetailPage').then(m => ({ default: m.ServerDetailPage })));
+const CreateServerPage = lazy(() => import('@modules/servers/CreateServerPage').then(m => ({ default: m.CreateServerPage })));
 const DaemonPage = lazy(() => import('@modules/daemon/DaemonPage').then(m => ({ default: m.DaemonPage })));
 const LogsPage = lazy(() => import('@modules/logs/LogsPage').then(m => ({ default: m.LogsPage })));
 const SettingsPage = lazy(() => import('@modules/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const LaunchPage = lazy(() => import('@modules/launch/LaunchPage').then(m => ({ default: m.LaunchPage })));
 
 const loading = (
   <div className="flex h-full items-center justify-center">
@@ -36,13 +38,19 @@ export default function App() {
                 <ErrorBoundary><ServersPage /></ErrorBoundary>
               } />
               <Route path="/servers/:serverId" element={
-                <ErrorBoundary><ServerDetailPage /></ErrorBoundary>
-              } />
+                 <ErrorBoundary><ServerDetailPage /></ErrorBoundary>
+               } />
+               <Route path="/servers/create" element={
+                 <ErrorBoundary><CreateServerPage /></ErrorBoundary>
+               } />
               <Route path="/daemon" element={
                 <ErrorBoundary><DaemonPage /></ErrorBoundary>
               } />
               <Route path="/logs" element={
                 <ErrorBoundary><LogsPage /></ErrorBoundary>
+              } />
+              <Route path="/launch" element={
+                <ErrorBoundary><LaunchPage /></ErrorBoundary>
               } />
               <Route path="/settings" element={
                 <ErrorBoundary><SettingsPage /></ErrorBoundary>

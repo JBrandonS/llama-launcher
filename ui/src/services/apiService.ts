@@ -125,6 +125,12 @@ export const apiService = {
     return res.ok;
   },
 
+  // ── Daemon Logs ─────────────────────────────────────────────
+  async getDaemonLogs(limit = 200): Promise<LogStreamResponse> {
+    const res = await request<LogStreamResponse>(`/daemon/logs?limit=${limit}`);
+    return res.ok ? (res.data as LogStreamResponse) : { entries: [], hasMore: false };
+  },
+
   // ── Logs ────────────────────────────────────────────────────
   async getLogs(
     serverId?: string,

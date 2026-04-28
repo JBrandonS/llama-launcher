@@ -52,9 +52,9 @@ src/
 
 ## Detailed TODO backlog
 
-### A) Foundations
+### A) Foundations ✅ COMPLETE
 
-- [ ] A1. Initialize UI app (React+TS+Vite), linting, formatting, and env configuration.
+- [x] A1. Initialize UI app (React+TS+Vite), linting, formatting, and env configuration.
   - Deliverables:
     - Vite app with strict TS config and path aliases.
     - ESLint + TypeScript rules + import order + no-floating-promises.
@@ -136,9 +136,9 @@ createBrowserRouter([
 ]);
 ```
 
-### B) API contracts and client layer
+### B) API contracts and client layer ✅ COMPLETE
 
-- [ ] B1. Define typed API contracts for servers, logs, metrics, daemon.
+- [x] B1. Define typed API contracts for servers, logs, metrics, daemon.
   - Deliverables:
     - `types.ts` with DTOs and discriminated unions.
     - Zod schemas for runtime validation.
@@ -210,9 +210,9 @@ const startMutation = useMutation({
 });
 ```
 
-### C) Server management UX
+### C) Server management UX ✅ COMPLETE
 
-- [ ] C1. Build server list page (table, filters, sorting, bulk actions).
+- [x] C1. Build server list page (table, filters, sorting, bulk actions).
   - Deliverables:
     - Virtualized table for large fleet sizes.
     - Debounced search and persisted filters in URL.
@@ -252,9 +252,9 @@ const FormSchema = z.object({
 });
 ```
 
-### D) textgen option parity (user-friendly parameter editor)
+### D) textgen option parity (user-friendly parameter editor) ✅ COMPLETE
 
-- [ ] D1. Create parameter parity matrix mapping textgen options to UI fields.
+- [x] D1. Create parameter parity matrix mapping textgen options to UI fields.
   - Deliverables:
     - Source-of-truth table: CLI flag, type, default, UI label, section, help, validation.
     - Automated check to detect missing mappings.
@@ -312,9 +312,9 @@ function fromCliArgs(input: string): LaunchFormValues {
 }
 ```
 
-### E) Dashboard and observability
+### E) Dashboard and observability ✅ COMPLETE
 
-- [ ] E1. Build dashboard summary cards and trend charts.
+- [x] E1. Build dashboard summary cards and trend charts.
   - Deliverables:
     - Cards: total servers, running, errored, pending actions.
     - Sparklines for 1h/24h trend windows.
@@ -361,9 +361,9 @@ const visibleLines = applyLogFilters(lines, { severity, query, serverIds });
 return <VirtualizedLogList lines={visibleLines} follow={followMode} />;
 ```
 
-### F) Daemon management
+### F) Daemon management ✅ COMPLETE
 
-- [ ] F1. Build daemon status card (state, PID, uptime, restart count, last error).
+- [x] F1. Build daemon status card (state, PID, uptime, restart count, last error).
   - Deliverables:
     - Real-time status indicator with stale-data marker.
     - Health badge (healthy/degraded/unhealthy) derived from heartbeat lag.

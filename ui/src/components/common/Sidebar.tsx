@@ -8,11 +8,13 @@ import {
   Terminal,
   Settings,
   Cpu,
+  Rocket,
   Menu,
   X,
 } from 'lucide-react';
 
 const navItems = [
+  { to: '/launch', label: 'Launch', icon: Rocket },
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/servers', label: 'Servers', icon: Server },
   { to: '/daemon', label: 'Daemon', icon: Activity },

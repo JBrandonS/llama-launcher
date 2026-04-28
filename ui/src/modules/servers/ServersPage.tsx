@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Badge } from '@components/common/Badge';
 import { apiService } from '@services/apiService';
 import { Loader2, Plus, RefreshCw, ArrowUpDown, Search, Eye } from 'lucide-react';
@@ -41,8 +42,10 @@ function ServerRow({
     mutationFn: () => apiService.stopServer(server.id),
     onMutate: () => setIsStopping(true),
     onSuccess: () => {
+      toast.success('Server stopped');
       queryClient.invalidateQueries({ queryKey: ['servers'] });
     },
+    onError: () => toast.error('Failed to stop server'),
     onSettled: () => setIsStopping(false),
   });
 
@@ -87,22 +90,26 @@ function ServerRow({
           >
             <Eye className="h-4 w-4" />
           </button>
-          <button
-            onClick={() => stopMutation.mutate()}
-            disabled={server.status !== 'running' || isStopping}
-            className={cn(
-              'inline-flex h-8 items-center rounded-md border px-3 text-sm transition-colors',
-              server.status === 'running'
-                ? 'border-destructive/30 text-destructive hover:bg-destructive/10'
-                : 'cursor-not-allowed opacity-50'
-            )}
-          >
-            {isStopping ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              'Stop'
-            )}
-          </button>
+         <button
+              onClick={() => {
+                if (window.confirm(`Stop ${server.name || server.id}? This action will terminate the server process.`)) {
+                  stopMutation.mutate();
+                }
+              }}
+              disabled={server.status !== 'running' || isStopping}
+              className={cn(
+                'inline-flex h-8 items-center rounded-md border px-3 text-sm transition-colors',
+                server.status === 'running'
+                  ? 'border-destructive/30 text-destructive hover:bg-destructive/10'
+                  : 'cursor-not-allowed opacity-50'
+              )}
+            >
+              {isStopping ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                'Stop'
+              )}
+            </button>
         </div>
       </td>
     </tr>
@@ -115,12 +122,130 @@ function formatUptime(seconds: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    setMatches(media.matches);
+    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
+    media.addEventListener('change', handler);
+    return () => media.removeEventListener('change', handler);
+  }, [query]);
+  return matches;
+}
+
+function ServerCard({
+  server,
+  onOpen,
+}: {
+  server: ServerInfo;
+  onOpen: (id: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [isStopping, setIsStopping] = useState(false);
+
+  const stopMutation = useMutation({
+    mutationFn: () => apiService.stopServer(server.id),
+    onMutate: () => setIsStopping(true),
+    onSuccess: () => {
+      toast.success('Server stopped');
+      queryClient.invalidateQueries({ queryKey: ['servers'] });
+    },
+    onError: () => toast.error('Failed to stop server'),
+    onSettled: () => setIsStopping(false),
+  });
+
+  return (
+    <div
+      className="rounded-lg border bg-card p-4 shadow-sm transition-colors hover:bg-accent/50"
+      role="article"
+      aria-label={`Server ${server.name || server.id}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate font-medium">
+              {server.name || server.id}
+            </h3>
+            <StatusBadge status={server.status} />
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            <span className="font-mono">{server.id}</span>
+            {server.port != null && <span className="ml-1">· Port {server.port}</span>}
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            {server.model && (
+              <>
+                <span className="text-muted-foreground">Model:</span>
+                <span className="truncate">{server.model}</span>
+              </>
+            )}
+            {server.gpuInfo?.model && (
+              <>
+                <span className="text-muted-foreground">GPU:</span>
+                <span className="truncate">{server.gpuInfo.model}</span>
+              </>
+            )}
+            {server.gpuInfo?.memoryUsed != null && (
+              <>
+                <span className="text-muted-foreground">VRAM:</span>
+                <span>{server.gpuInfo.memoryUsed} / {server.gpuInfo.memoryTotal} MB</span>
+              </>
+            )}
+            {server.uptimeSeconds != null && (
+              <>
+                <span className="text-muted-foreground">Uptime:</span>
+                <span>{formatUptime(server.uptimeSeconds)}</span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col gap-2">
+          <button
+            onClick={() => onOpen(server.id)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border hover:bg-accent"
+            aria-label={`View ${server.name || server.id} details`}
+            title="View details"
+          >
+            <Eye className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => {
+              if (window.confirm(`Stop ${server.name || server.id}? This action will terminate the server process.`)) {
+                stopMutation.mutate();
+              }
+            }}
+            disabled={server.status !== 'running' || isStopping}
+            className={cn(
+              'inline-flex h-9 w-9 items-center justify-center rounded-md border text-xs transition-colors',
+              server.status === 'running'
+                ? 'border-destructive/30 text-destructive hover:bg-destructive/10'
+                : 'cursor-not-allowed border-border/50 opacity-50'
+            )}
+            aria-label={`Stop ${server.name || server.id}`}
+            aria-disabled={server.status !== 'running' || isStopping}
+            aria-busy={isStopping}
+            title={isStopping ? 'Stopping...' : 'Stop server'}
+          >
+            {isStopping ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <span className="font-medium">Stop</span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ServersPage() {
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('id');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [page, setPage] = useState(1);
   const limit = 10;
+  const isMobile = useMediaQuery('(max-width: 639px)');
 
   const { data: servers = [], isLoading } = useQuery({
     queryKey: ['servers'],
@@ -209,62 +334,87 @@ export function ServersPage() {
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/30 text-muted-foreground">
-              {(
-                [
-                  ['id', 'Name'],
-                  ['status', 'Status'],
-                  ['name', 'Port'],
-                  ['gpu', 'Model'],
-                  ['uptime', 'GPU'],
-                ] as [SortField, string][]
-              ).map(([field, label]) => (
-                <th
-                  key={field}
-                  onClick={() => handleSort(field)}
-                  className="cursor-pointer px-4 py-2.5 text-left font-medium hover:bg-accent/50"
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {label}
-                    {sortField === field && (
-                      <ArrowUpDown className="h-3 w-3" />
-                    )}
-                  </span>
-                </th>
-              ))}
-              <th className="px-4 py-2.5 text-right font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center">
-                  <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
-                </td>
+      {isMobile ? (
+        <div className="grid gap-3">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center rounded-lg border bg-card py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <p className="mt-2 text-sm text-muted-foreground">Loading servers...</p>
+            </div>
+          ) : paged.length === 0 ? (
+            <div className="rounded-lg border bg-card py-12 text-center text-muted-foreground">
+              No servers found
+            </div>
+          ) : (
+            paged.map((server) => (
+              <ServerCard
+                key={server.id}
+                server={server}
+                onOpen={(id) => {
+                  window.location.href = `/servers/${id}`;
+                }}
+              />
+            ))
+          )}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/30 text-muted-foreground">
+                {(
+                  [
+                    ['id', 'Name'],
+                    ['status', 'Status'],
+                    ['name', 'Port'],
+                    ['gpu', 'Model'],
+                    ['uptime', 'GPU'],
+                  ] as [SortField, string][]
+                ).map(([field, label]) => (
+                  <th
+                    key={field}
+                    onClick={() => handleSort(field)}
+                    className="cursor-pointer px-4 py-2.5 text-left font-medium hover:bg-accent/50"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {label}
+                      {sortField === field && (
+                        <ArrowUpDown className="h-3 w-3" />
+                      )}
+                    </span>
+                  </th>
+                ))}
+                <th className="px-4 py-2.5 text-right font-medium">Actions</th>
               </tr>
-            ) : paged.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
-                  No servers found
-                </td>
-              </tr>
-            ) : (
-              paged.map((server) => (
-                <ServerRow
-                  key={server.id}
-                  server={server}
-                  onOpen={(id) => {
-                    window.location.href = `/servers/${id}`;
-                  }}
-                />
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center">
+                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
+                  </td>
+                </tr>
+              ) : paged.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                    No servers found
+                  </td>
+                </tr>
+              ) : (
+                paged.map((server) => (
+                  <ServerRow
+                    key={server.id}
+                    server={server}
+                    onOpen={(id) => {
+                      window.location.href = `/servers/${id}`;
+                    }}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
