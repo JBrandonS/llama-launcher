@@ -9,6 +9,8 @@ import { apiService } from '@services/apiService';
 import type { ServerInfo, Settings as SettingsType, ValidationError, ModelInfo } from '@services/types';
 import { PresetsManager } from '@components/launch/PresetsManager';
 import type { Preset } from '@components/launch/PresetsManager';
+import { TemplateSelector } from '@components/launch/TemplateSelector';
+import { TemplateLoader } from '@utils/templateLoader';
 import {
   CollapsibleSection,
   type SectionDef,
@@ -45,27 +47,27 @@ interface PresetFormData {
 
 const DEFAULT_FORM: PresetFormData = {
   gpu_layers: -1,
-  context_size: 4096,
-  threads: 4,
-  temp: 0.7,
+  context_size: 0,
+  threads: 0,
+  temp: 0.8,
   top_k: 40,
   top_p: 0.95,
   min_p: 0.05,
   typical_p: 1.0,
-  penalty_range: 10,
+  penalty_range: 64,
   repeat_penalty: 1.1,
-  repeat_last_n: 64,
+  repeat_last_n: 0,
   presence_penalty: 0.0,
   frequency_penalty: 0.0,
   mirostat: 0,
   mirostat_tau: 5.0,
   mirostat_eta: 0.1,
   seed: -1,
-  num_predict: 512,
-  num_keep: 0,
+  num_predict: -1,
+  num_keep: -1,
   rope_freq_scale: 1.0,
   grammar_file: '',
-  batch_size: 512,
+  batch_size: 2048,
   cache_reuse: 0,
 };
 
@@ -90,11 +92,11 @@ function validateForm(
   if (formData.temp < 0 || formData.temp > 2) {
     errors.push({ field: 'temp', message: 'Temperature must be between 0 and 2' });
   }
-  if (formData.context_size < 128 || formData.context_size > 131072) {
-    errors.push({ field: 'context_size', message: 'Context size must be between 128 and 131072' });
+  if (formData.context_size < 0 || formData.context_size > 131072) {
+    errors.push({ field: 'context_size', message: 'Context size must be between 0 and 131072' });
   }
-  if (formData.threads < 1 || formData.threads > 128) {
-    errors.push({ field: 'threads', message: 'Threads must be between 1 and 128' });
+  if (formData.threads < 0 || formData.threads > 128) {
+    errors.push({ field: 'threads', message: 'Threads must be between 0 and 128 (0 = auto-detect)' });
   }
   if (formData.top_k < 1 || formData.top_k > 1000) {
     errors.push({ field: 'top_k', message: 'Top-k must be between 1 and 1000' });
@@ -108,8 +110,8 @@ function validateForm(
   if (formData.repeat_penalty < 0 || formData.repeat_penalty > 2) {
     errors.push({ field: 'repeat_penalty', message: 'Repeat penalty must be between 0 and 2' });
   }
-  if (formData.num_predict < 1 || formData.num_predict > 4096) {
-    errors.push({ field: 'num_predict', message: 'Num predict must be between 1 and 4096' });
+  if (formData.num_predict < -1 || formData.num_predict > 4096) {
+    errors.push({ field: 'num_predict', message: 'Num predict must be between -1 and 4096 (-1 = unlimited)' });
   }
   if (formData.seed < -1) {
     errors.push({ field: 'seed', message: 'Seed must be >= -1' });
@@ -160,6 +162,7 @@ export function LaunchPage() {
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: servers } = useQuery({
@@ -277,6 +280,62 @@ export function LaunchPage() {
     },
     []
   );
+
+  const KNOWN_FORM_FIELDS: Set<keyof PresetFormData> = new Set([
+    'gpu_layers', 'context_size', 'threads', 'temp', 'top_k', 'top_p',
+    'min_p', 'typical_p', 'penalty_range', 'repeat_penalty', 'repeat_last_n',
+    'presence_penalty', 'frequency_penalty', 'mirostat', 'mirostat_tau',
+    'mirostat_eta', 'seed', 'num_predict', 'num_keep', 'rope_freq_scale',
+    'grammar_file', 'batch_size', 'cache_reuse',
+  ]);
+
+  const applyTemplateArgs = useCallback((template: ReturnType<typeof TemplateLoader.getDefaultTemplate>) => {
+    if (!template) return;
+    const args = template.args;
+
+    const newForm: Partial<PresetFormData> = {};
+
+    for (const [key, value] of Object.entries(args)) {
+      if (KNOWN_FORM_FIELDS.has(key as keyof PresetFormData)) {
+        (newForm as Record<string, unknown>)[key] = value;
+      }
+    }
+
+    if (Object.keys(newForm).length > 0) {
+      setForm((prev) => ({ ...prev, ...newForm }));
+    }
+
+    if (args.port !== undefined) {
+      setPort(args.port);
+    }
+
+    TemplateLoader.saveLastUsed(selectedModelPath, template.id);
+  }, [selectedModelPath]);
+
+  const handleTemplateSelect = useCallback((templateId: string) => {
+    setSelectedTemplateId(templateId);
+    const template = TemplateLoader.templates.find((t) => t.id === templateId);
+    if (template) {
+      applyTemplateArgs(template);
+    }
+  }, [applyTemplateArgs]);
+
+  useEffect(() => {
+    if (!selectedModelPath) {
+      setSelectedTemplateId('');
+      setPort(null);
+      setForm({ ...DEFAULT_FORM });
+      return;
+    }
+
+    const template = TemplateLoader.getDefaultTemplate(selectedModelPath);
+    if (template) {
+      setSelectedTemplateId(template.id);
+      applyTemplateArgs(template);
+    } else {
+      setSelectedTemplateId('');
+    }
+  }, [selectedModelPath, applyTemplateArgs]);
 
   const launchMutation = useMutation({
     mutationFn: async (config: Parameters<typeof apiService.launchServer>[0]) =>
@@ -475,6 +534,11 @@ export function LaunchPage() {
             }
           />
         </div>
+        <TemplateSelector
+          modelPath={selectedModelPath}
+          selectedTemplateId={selectedTemplateId}
+          onTemplateSelect={handleTemplateSelect}
+        />
       </div>
 
    <PresetsManager
@@ -499,18 +563,18 @@ export function LaunchPage() {
               label="Context Size"
               value={form.context_size}
               onChange={(v) => updateField('context_size', v)}
-              min={128}
+              min={0}
               max={131072}
               step={128}
-              hint="Number of tokens in context window"
+              hint="Number of tokens in context window (0 = model default)"
             />
             <NumberInput
               label="Threads"
               value={form.threads}
-              onChange={(v) => updateField('threads', Math.round(parseFloat(String(v))) || 1)}
-              min={1}
+              onChange={(v) => updateField('threads', Math.round(parseFloat(String(v))) || 0)}
+              min={0}
               max={128}
-              hint="CPU threads for inference"
+              hint="CPU threads for inference (0 = auto-detect)"
             />
           </div>
         </CollapsibleSection>
@@ -606,17 +670,17 @@ export function LaunchPage() {
               label="Num Predict"
               value={form.num_predict}
               onChange={(v) => updateField('num_predict', v)}
-              min={1}
+              min={-1}
               max={4096}
               step={1}
-              hint="Maximum tokens to generate"
+              hint="Maximum tokens to generate (-1 = unlimited)"
             />
             <NumberInput
               label="Num Keep"
               value={form.num_keep}
-              onChange={(v) => updateField('num_keep', Math.round(parseFloat(String(v))) || 0)}
-              min={0}
-              hint="Number of tokens to keep from system prompt"
+              onChange={(v) => updateField('num_keep', Math.round(parseFloat(String(v))) || -1)}
+              min={-1}
+              hint="Number of tokens to keep from system prompt (-1 = all)"
             />
           </div>
         </CollapsibleSection>
