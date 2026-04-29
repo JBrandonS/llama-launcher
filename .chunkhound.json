@@ -1,0 +1,7 @@
+{
+  "embedding": {
+    "provider": "openai",
+    "model": "unsloth/embeddinggemma-300m-GGUF",
+    "base_url": "http://localhost:12346/v1"
+  }
+}
