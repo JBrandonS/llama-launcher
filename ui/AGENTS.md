@@ -4,8 +4,6 @@
 **Commit:** d48f2b16d255bf57a6e760eac2cf101a351d2fa0
 **Branch:** main
 
-`/home/b/.config/opencode/SOUL.md` must be loaded at start of every AI task session
-
 ## MODULE SCOPE
 React 18 + TypeScript frontend — Vite 6 build, React Router v6 lazy routes, React Query data layer, Tailwind CSS styling, Playwright E2E. Served by dev server on port 3000 with `/api` proxy to backend.
 
