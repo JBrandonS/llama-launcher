@@ -3,7 +3,7 @@ import unittest
 import os
 import tempfile
 from pathlib import Path
-from llama_launcher.model_manager import scan_local_models, ModelRegistry
+from backend.model_manager import scan_local_models, ModelRegistry
 from typing import Optional, List
 
 class TestModelScanner(unittest.TestCase):

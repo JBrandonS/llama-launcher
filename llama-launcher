@@ -4,7 +4,7 @@
 import os
 import sys
 from pathlib import Path
-from llama_launcher.cli import cli
+from backend.cli import cli
 
 def main():
     """

@@ -5,8 +5,8 @@ import logging
 import io
 
 # Import components from the project structure
-from llama_launcher.exceptions import TransientProcessError
-from llama_launcher.logger import get_logger, setup_logger
+from backend.exceptions import TransientProcessError
+from backend.logger import get_logger, setup_logger
 
 
 class TestLoggingAndExceptions(unittest.TestCase):

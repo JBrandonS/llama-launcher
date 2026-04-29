@@ -5,8 +5,8 @@ import tempfile
 import time
 
 from click.testing import CliRunner
-from llama_launcher.cli import cli
-from llama_launcher.daemon import Daemon
+from backend.cli import cli
+from backend.daemon import Daemon
 
 
 class E2ETestSuite(unittest.TestCase):
@@ -21,8 +21,8 @@ class E2ETestSuite(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_01_basic_functionality(self):
-        with patch('llama_launcher.cli.ProcessManager') as MockPM, \
-             patch('llama_launcher.config.load_config') as MockConfig:
+        with patch('backend.cli.ProcessManager') as MockPM, \
+             patch('backend.config.load_config') as MockConfig:
 
             mock_pm = MagicMock()
             mock_pm.start_server.return_value = {'pid': 9999, 'status': 'started'}
@@ -38,8 +38,8 @@ class E2ETestSuite(unittest.TestCase):
 
 
     def test_02_config_override_temperature(self):
-        with patch('llama_launcher.cli.ProcessManager') as MockPM, \
-             patch('llama_launcher.config.load_config') as MockConfig:
+        with patch('backend.cli.ProcessManager') as MockPM, \
+             patch('backend.config.load_config') as MockConfig:
 
             mock_pm = MagicMock()
             mock_pm.start_server.return_value = {'pid': 9998, 'status': 'started'}
@@ -58,8 +58,8 @@ class E2ETestSuite(unittest.TestCase):
 
 
     def test_03_failure_resilience(self):
-        with patch('llama_launcher.cli.ProcessManager') as MockPM, \
-             patch('llama_launcher.config.load_config') as MockConfig:
+        with patch('backend.cli.ProcessManager') as MockPM, \
+             patch('backend.config.load_config') as MockConfig:
 
             mock_pm = MagicMock()
             mock_pm.start_server.side_effect = RuntimeError("Connection timeout")
@@ -78,8 +78,8 @@ class E2ETestSuite(unittest.TestCase):
 
 
     def test_04_foreground_mode(self):
-        with patch('llama_launcher.cli.ProcessManager') as MockPM, \
-             patch('llama_launcher.config.load_config') as MockConfig:
+        with patch('backend.cli.ProcessManager') as MockPM, \
+             patch('backend.config.load_config') as MockConfig:
 
             mock_pm = MagicMock()
             mock_pm.start_server.return_value = {'pid': 12345, 'status': 'started'}
@@ -98,8 +98,8 @@ class E2ETestSuite(unittest.TestCase):
 
 
     def test_06_background_is_default(self):
-        with patch('llama_launcher.cli.ProcessManager') as MockPM, \
-             patch('llama_launcher.config.load_config') as MockConfig:
+        with patch('backend.cli.ProcessManager') as MockPM, \
+             patch('backend.config.load_config') as MockConfig:
 
             mock_pm = MagicMock()
             mock_pm.start_server.return_value = {'pid': 54321, 'status': 'started'}

@@ -3,9 +3,9 @@ import asyncio
 import unittest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
-from llama_launcher.config import LlamaConfig
-from llama_launcher.model_manager import ModelManager
-from llama_launcher.exceptions import TransientProcessError
+from backend.config import LlamaConfig
+from backend.model_manager import ModelManager
+from backend.exceptions import TransientProcessError
 from typing import Optional, List
 
 class TestModelManager(unittest.TestCase):
@@ -18,7 +18,7 @@ class TestModelManager(unittest.TestCase):
         self.manager = ModelManager(self.mock_config)
 
     def test_autodetect_local_models_success(self):
-        with patch('llama_launcher.model_manager.scan_local_models') as mock_scan:
+        with patch('backend.model_manager.scan_local_models') as mock_scan:
             mock_scan.return_value = [
                 {"id": "model_a_7b", "path": "/tmp/test_models/model_a_7b.gguf", "source": "local"}
             ]
@@ -42,7 +42,7 @@ class TestModelManager(unittest.TestCase):
 
         self.assertEqual(len(detected), 0)
 
-    @patch('llama_launcher.model_manager.HfApi')
+    @patch('backend.model_manager.HfApi')
     def test_search_huggingface_success(self, MockHfApi):
         # Mock the HfApi instance and the list_models method
         mock_api_instance = MockHfApi.return_value
@@ -84,7 +84,7 @@ class TestModelManager(unittest.TestCase):
         self.assertEqual(results[1]["author"], "UserA")
         self.assertIn("tags", results[1])
 
-    @patch('llama_launcher.model_manager.HfApi')
+    @patch('backend.model_manager.HfApi')
     @patch('asyncio.sleep', return_value=None)  # Mock sleep to speed up test
     def test_search_huggingface_rate_limit_and_backoff(self, mock_sleep, MockHfApi):
         # Mock the HfApi instance and the list_models method
@@ -126,7 +126,7 @@ class TestModelManager(unittest.TestCase):
         # Assert backoff logic was called (sleep called twice)
         self.assertEqual(mock_sleep.call_count, 2)
 
-    @patch('llama_launcher.model_manager.HfApi')
+    @patch('backend.model_manager.HfApi')
     @patch('asyncio.sleep', return_value=None)  # Mock sleep to speed up test
     def test_search_huggingface_max_retries_failure(self, mock_sleep, MockHfApi):
         # Mock the HfApi instance and the list_models method

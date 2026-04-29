@@ -12,7 +12,7 @@ Read the SOUL.md to initialize agents.
 ## STRUCTURE
 ```
 llama-launcher/
-├── llama_launcher/   # 🔑 Python backend (14 .py modules)
+├── backend/          # 🔑 Python backend (14 .py modules)
 │   ├── cli.py        # Click CLI group, 15+ subcommands
 │   ├── config.py     # Pydantic LlamaConfig — tri-source loading
 │   ├── model_manager.py  # Auto-detect GGUF + HF search
@@ -34,7 +34,7 @@ llama-launcher/
 │   ├── src/app/      # Router shell, ErrorBoundary wrapper
 │   └── src/styles/   # Tailwind CSS vars (dark/light class-based)
 ├── tests/            # 7 unittest.TestCase files + Playwright E2E
-├── tools/            # ZERA prompt quality checker
+├── prompts/          # AI planning documents
 ├── config.yaml       # Runtime defaults
 ├── pyproject.toml    # Build, entry point, deps
 ├── SOUL.md           # Agent OS (must load first)
@@ -45,29 +45,29 @@ llama-launcher/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Add CLI command | `llama_launcher/cli.py` | Click group, 15+ subcommands, -v/-vv flags |
-| Change model/config | `llama_launcher/config.py` | LlamaConfig Pydantic model, tri-source |
-| Model detection | `llama_launcher/model_manager.py` | autodetect_local_models + HfApi search |
-| Spawn llama.cpp | `llama_launcher/llama_runner.py` | generate_command, _ATTR_MAP, run_model |
-| PID/process mgmt | `llama_launcher/process_manager.py` | start_server, stop_server, status |
-| Daemon/systemd | `llama_launcher/daemon.py` | generate_systemd_service, start/stop daemon |
+| Add CLI command | `backend/cli.py` | Click group, 15+ subcommands, -v/-vv flags |
+| Change model/config | `backend/config.py` | LlamaConfig Pydantic model, tri-source |
+| Model detection | `backend/model_manager.py` | autodetect_local_models + HfApi search |
+| Spawn llama.cpp | `backend/llama_runner.py` | generate_command, _ATTR_MAP, run_model |
+| PID/process mgmt | `backend/process_manager.py` | start_server, stop_server, status |
+| Daemon/systemd | `backend/daemon.py` | generate_systemd_service, start/stop daemon |
 | Frontend pages | `ui/src/modules/` | DashboardPage, ServersPage, SettingsPage, DaemonPage, ServerDetailPage |
 | API/WS clients | `ui/src/services/` | apiService, wsService (exponential backoff), errorService |
 | Shared UI | `ui/src/components/common/` | Sidebar, TopBar, Breadcrumb, ErrorBoundary |
 | Add test | `tests/` | unittest.TestCase (not pytest despite pyproject.toml listing) |
-| Prompt quality | `tools/prompt_check.py` | ZERA framework validation |
+| AI plans | `prompts/` | Planning documents and cleanup tasks |
 
 ## CODE MAP (Key Symbols)
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
-| `cli()` | function | `llama_launcher/cli.py` | Click group, 15+ subcommands |
-| `LlamaConfig` | class | `llama_launcher/config.py` | Pydantic model, tri-source loading |
-| `ModelManager` | class | `llama_launcher/model_manager.py` | autodetect_local_models, search_huggingface, run_benchmark |
-| `LlamaRunner` | class | `llama_launcher/llama_runner.py` | generate_command, run_model_sync/async/mock |
-| `ProcessManager` | class | `llama_launcher/process_manager.py` | start/stop/status_server, list_servers, PID_DIR |
+| `cli()` | function | `backend/cli.py` | Click group, 15+ subcommands |
+| `LlamaConfig` | class | `backend/config.py` | Pydantic model, tri-source loading |
+| `ModelManager` | class | `backend/model_manager.py` | autodetect_local_models, search_huggingface, run_benchmark |
+| `LlamaRunner` | class | `backend/llama_runner.py` | generate_command, run_model_sync/async/mock |
+| `ProcessManager` | class | `backend/process_manager.py` | start/stop/status_server, list_servers, PID_DIR |
 | `App` | component | `ui/src/app/App.tsx` | Router shell, lazy routes, ErrorBoundary per route |
-| `Daemon` | class | `llama_launcher/daemon.py` | Thread-based daemon, reload event |
-| `ConfigStore` | class | `llama_launcher/config_store.py` | Named config persistence, CONFIGS_DIR |
+| `Daemon` | class | `backend/daemon.py` | Thread-based daemon, reload event |
+| `ConfigStore` | class | `backend/config_store.py` | Named config persistence, CONFIGS_DIR |
 
 ## CONVENTIONS
 - **Config priority:** CLI args > env vars > `config.yaml` > hardcoded defaults
@@ -126,8 +126,8 @@ cd ui && npm run test:e2e
 ```
 
 ## NOTES
-- Entry point defined in `pyproject.toml`: `llama-launcher = "llama_launcher.cli:cli"`
+- Entry point defined in `pyproject.toml`: `llama-launcher = "backend.cli:cli"`
 - Model search paths configured in `config.yaml` (`model_search_paths`)
 - GPU acceleration controlled by `n_gpu_layers` in config (set to -1 for all layers)
-- `prompt` file (no extension) and `llama-launcher` wrapper (no extension) are raw artifacts
+- `llama-launcher` wrapper (no extension) is a raw artifact
 - `SOUL.md` at project root must be loaded at start of every AI task session

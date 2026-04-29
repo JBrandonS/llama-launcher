@@ -1,7 +1,7 @@
 # tests/test_benchmark.py
 import unittest
 from unittest.mock import MagicMock
-from llama_launcher.benchmark import run_benchmark
+from backend.benchmark import run_benchmark
 
 class TestBenchmark(unittest.TestCase):
     """Tests the run_benchmark function for input validation and deterministic output."""

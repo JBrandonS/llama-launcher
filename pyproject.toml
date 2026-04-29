@@ -12,6 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click>=8.0",
     "pydantic>=2.0",
+    "pywebview>=5.0",
     "pyyaml>=6.0",
     "huggingface-hub>=0.20",
 ]
@@ -23,7 +24,8 @@ dev = [
 ]
 
 [project.scripts]
-llama-launcher = "llama_launcher.cli:cli"
+llama-launcher = "backend.cli:cli"
+llama-launcher-ui = "ui.launcher:main"
 
 [tool.setuptools.packages.find]
-include = ["llama_launcher*"]
+include = ["backend*"]
