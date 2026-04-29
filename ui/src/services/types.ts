@@ -32,6 +32,16 @@ export interface TokenUsage {
   timePerToken?: number;
 }
 
+// ─── Model Types ──────────────────────────────────────────────
+export interface ModelInfo {
+  id: string;
+  path: string;
+  size_bytes: number;
+  size_human: string;
+  last_modified: string;
+  tags: string[];
+}
+
 // ─── Metrics Types ─────────────────────────────────────────────
 export interface SystemMetrics {
   timestamp: string;

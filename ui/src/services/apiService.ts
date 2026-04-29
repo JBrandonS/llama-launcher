@@ -5,6 +5,7 @@ import type {
   LaunchConfig,
   LaunchResponse,
   LogStreamResponse,
+  ModelInfo,
   ServerInfo,
   Settings,
   SystemMetrics,
@@ -79,6 +80,12 @@ export const apiService = {
   async deleteServer(id: string): Promise<boolean> {
     const res = await request(`/servers/${id}`, { method: 'DELETE' });
     return res.ok;
+  },
+
+  // ── Models ──────────────────────────────────────────────────
+  async getModels(): Promise<ModelInfo[]> {
+    const res = await request('/models');
+    return res.ok ? (res.data as ModelInfo[]) : [];
   },
 
   // ── Metrics ─────────────────────────────────────────────────

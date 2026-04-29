@@ -1,18 +1,18 @@
 # llama-launcher — Knowledge Base
 
-**Generated:** 2026-04-22
-**Commit:** 2260217
+**Generated:** 2026-04-29
+**Commit:** d48f2b16d255bf57a6e760eac2cf101a351d2fa0
 **Branch:** main
 
 ## OVERVIEW
-Launch and manage llama.cpp inference servers (GGUF models) via CLI + React dashboard. Python backend (click CLI, Pydantic config, stdlib logging) + React frontend (Vite 6, React Router v6 lazy routes, React Query, sonner toasts, Tailwind CSS). Server defaults to port **12345**.
+Launch and manage llama.cpp inference servers (GGUF models) via CLI + React dashboard. Python backend (Click CLI, Pydantic config, stdlib logging, API server) + React frontend (Vite 6, React Router v6 lazy routes, React Query, sonner toasts, Tailwind CSS). Server defaults to port **12345**.
 
 Read the SOUL.md to initialize agents.
 
 ## STRUCTURE
 ```
 llama-launcher/
-├── backend/          # 🔑 Python backend (14 .py modules)
+├── backend/          # 🔑 Python backend (15 .py modules)
 │   ├── cli.py        # Click CLI group, 15+ subcommands
 │   ├── config.py     # Pydantic LlamaConfig — tri-source loading
 │   ├── model_manager.py  # Auto-detect GGUF + HF search
@@ -26,6 +26,7 @@ llama-launcher/
 │   ├── logger.py       # stdlib logging: 3 verbosity levels, JSON formatter
 │   ├── exceptions.py   # Exception hierarchy
 │   ├── model_cards.py  # Parse HF model card YAML frontmatter
+│   ├── api_server.py   # FastAPI HTTP API server (port 12345)
 │   └── __init__.py     # Deferred imports, __all__ exports
 ├── ui/               # React/TypeScript frontend (Vite 6)
 │   ├── src/modules/  # 6 page components (lazy-loaded)
@@ -35,6 +36,7 @@ llama-launcher/
 │   └── src/styles/   # Tailwind CSS vars (dark/light class-based)
 ├── tests/            # 7 unittest.TestCase files + Playwright E2E
 ├── prompts/          # AI planning documents
+├── docs/             # Project documentation (ARCHITECTURE, CONTRIBUTING, etc.)
 ├── config.yaml       # Runtime defaults
 ├── pyproject.toml    # Build, entry point, deps
 ├── SOUL.md           # Agent OS (must load first)
@@ -51,23 +53,26 @@ llama-launcher/
 | Spawn llama.cpp | `backend/llama_runner.py` | generate_command, _ATTR_MAP, run_model |
 | PID/process mgmt | `backend/process_manager.py` | start_server, stop_server, status |
 | Daemon/systemd | `backend/daemon.py` | generate_systemd_service, start/stop daemon |
+| API server | `backend/api_server.py` | FastAPI HTTP API, /models endpoint |
 | Frontend pages | `ui/src/modules/` | DashboardPage, ServersPage, SettingsPage, DaemonPage, ServerDetailPage |
 | API/WS clients | `ui/src/services/` | apiService, wsService (exponential backoff), errorService |
 | Shared UI | `ui/src/components/common/` | Sidebar, TopBar, Breadcrumb, ErrorBoundary |
 | Add test | `tests/` | unittest.TestCase (not pytest despite pyproject.toml listing) |
 | AI plans | `prompts/` | Planning documents and cleanup tasks |
+| Project docs | `docs/` | ARCHITECTURE, CONTRIBUTING, CLI_REFERENCE, API, DEPLOYMENT, CONFIGURATION |
 
 ## CODE MAP (Key Symbols)
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
-| `cli()` | function | `backend/cli.py` | Click group, 15+ subcommands |
-| `LlamaConfig` | class | `backend/config.py` | Pydantic model, tri-source loading |
+| `cli()` | function | `backend/cli.py` | Click group entry point, 15+ subcommands |
+| `LlamaConfig` | class | `backend/config.py` | Pydantic model, tri-source (CLI > env > YAML > defaults) |
 | `ModelManager` | class | `backend/model_manager.py` | autodetect_local_models, search_huggingface, run_benchmark |
 | `LlamaRunner` | class | `backend/llama_runner.py` | generate_command, run_model_sync/async/mock |
-| `ProcessManager` | class | `backend/process_manager.py` | start/stop/status_server, list_servers, PID_DIR |
+| `ProcessManager` | class | `backend/process_manager.py` | start_server, stop_server, status, list_servers |
 | `App` | component | `ui/src/app/App.tsx` | Router shell, lazy routes, ErrorBoundary per route |
 | `Daemon` | class | `backend/daemon.py` | Thread-based daemon, reload event |
 | `ConfigStore` | class | `backend/config_store.py` | Named config persistence, CONFIGS_DIR |
+| `api_server` | module | `backend/api_server.py` | FastAPI HTTP API server |
 
 ## CONVENTIONS
 - **Config priority:** CLI args > env vars > `config.yaml` > hardcoded defaults
@@ -130,4 +135,4 @@ cd ui && npm run test:e2e
 - Model search paths configured in `config.yaml` (`model_search_paths`)
 - GPU acceleration controlled by `n_gpu_layers` in config (set to -1 for all layers)
 - `llama-launcher` wrapper (no extension) is a raw artifact
-- `SOUL.md` at project root must be loaded at start of every AI task session
+- `/home/b/.config/opencode/SOUL.md` must be loaded at start of every AI task session
