@@ -37,7 +37,7 @@ interface PresetFormData {
   mirostat_tau: number;
   mirostat_eta: number;
   seed: number;
-  num_predict: number;
+  n_predict: number;
   num_keep: number;
   rope_freq_scale: number;
   grammar_file: string;
@@ -63,7 +63,7 @@ const DEFAULT_FORM: PresetFormData = {
   mirostat_tau: 5.0,
   mirostat_eta: 0.1,
   seed: -1,
-  num_predict: -1,
+  n_predict: 256,
   num_keep: -1,
   rope_freq_scale: 1.0,
   grammar_file: '',
@@ -110,8 +110,8 @@ function validateForm(
   if (formData.repeat_penalty < 0 || formData.repeat_penalty > 2) {
     errors.push({ field: 'repeat_penalty', message: 'Repeat penalty must be between 0 and 2' });
   }
-  if (formData.num_predict < -1 || formData.num_predict > 4096) {
-    errors.push({ field: 'num_predict', message: 'Num predict must be between -1 and 4096 (-1 = unlimited)' });
+  if (formData.n_predict < -1 || formData.n_predict > 4096) {
+    errors.push({ field: 'n_predict', message: 'Num predict must be between -1 and 4096 (-1 = unlimited)' });
   }
   if (formData.seed < -1) {
     errors.push({ field: 'seed', message: 'Seed must be >= -1' });
@@ -244,7 +244,7 @@ export function LaunchPage() {
         mirostat_tau = DEFAULT_FORM.mirostat_tau,
         mirostat_eta = DEFAULT_FORM.mirostat_eta,
         seed = DEFAULT_FORM.seed,
-        num_predict = DEFAULT_FORM.num_predict,
+        n_predict = DEFAULT_FORM.n_predict,
         num_keep = DEFAULT_FORM.num_keep,
         rope_freq_scale = DEFAULT_FORM.rope_freq_scale,
         grammar_file = DEFAULT_FORM.grammar_file,
@@ -270,7 +270,7 @@ export function LaunchPage() {
         mirostat_tau,
         mirostat_eta,
         seed,
-        num_predict,
+        n_predict,
         num_keep,
         rope_freq_scale,
         grammar_file,
@@ -285,7 +285,7 @@ export function LaunchPage() {
     'gpu_layers', 'context_size', 'threads', 'temp', 'top_k', 'top_p',
     'min_p', 'typical_p', 'penalty_range', 'repeat_penalty', 'repeat_last_n',
     'presence_penalty', 'frequency_penalty', 'mirostat', 'mirostat_tau',
-    'mirostat_eta', 'seed', 'num_predict', 'num_keep', 'rope_freq_scale',
+    'mirostat_eta', 'seed', 'n_predict', 'num_keep', 'rope_freq_scale',
     'grammar_file', 'batch_size', 'cache_reuse',
   ]);
 
@@ -668,8 +668,8 @@ export function LaunchPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <SliderInput
               label="Num Predict"
-              value={form.num_predict}
-              onChange={(v) => updateField('num_predict', v)}
+              value={form.n_predict}
+              onChange={(v) => updateField('n_predict', v)}
               min={-1}
               max={4096}
               step={1}

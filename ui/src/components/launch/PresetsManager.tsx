@@ -20,7 +20,7 @@ interface PresetValue {
   mirostat_tau?: number;
   mirostat_eta?: number;
   seed?: number;
-  num_predict?: number;
+  n_predict?: number;
   num_keep?: number;
   rope_freq_scale?: number;
   logit_bias?: Record<string, number>;
@@ -51,7 +51,7 @@ const BUILTIN_PRESETS: Preset[] = [
       temp: 0.8,
       top_k: 10,
       top_p: 0.9,
-      num_predict: 256,
+      n_predict: 256,
     },
   },
   {
@@ -68,7 +68,7 @@ const BUILTIN_PRESETS: Preset[] = [
       top_p: 0.95,
       min_p: 0.05,
       repeat_penalty: 1.1,
-      num_predict: 512,
+      n_predict: 512,
     },
   },
   {
@@ -88,7 +88,7 @@ const BUILTIN_PRESETS: Preset[] = [
       repeat_penalty: 1.05,
       presence_penalty: 0.3,
       frequency_penalty: 0.3,
-      num_predict: 1024,
+      n_predict: 1024,
     },
   },
   {
@@ -108,7 +108,7 @@ const BUILTIN_PRESETS: Preset[] = [
       repeat_last_n: 64,
       presence_penalty: 0.5,
       frequency_penalty: 0.5,
-      num_predict: 256,
+      n_predict: 256,
     },
   },
   {
@@ -125,7 +125,7 @@ const BUILTIN_PRESETS: Preset[] = [
       top_p: 0.95,
       min_p: 0.05,
       repeat_penalty: 1.1,
-      num_predict: 2048,
+      n_predict: 2048,
       cache_reuse: 512,
     },
   },

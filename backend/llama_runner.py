@@ -19,6 +19,20 @@ class LlamaRunner:
             if shutil.which(name):
                 return name
         return "llama-server"
+    @staticmethod
+    def _clamp_n_predict(value: int) -> int:
+        """Clamp n_predict to llama.cpp valid range: -1 (unlimited) or 1..4096."""
+        if value == -1:
+            return value
+        if value < 1:
+            logging.warning(f'n_predict {value} < 1, clamping to 1')
+            return 1
+        if value > 4096:
+            logging.warning(f'n_predict {value} > 4096, clamping to 4096')
+            return 4096
+        return value
+
+
 
     def generate_command(
         self, model_path: str, custom_options: Optional[Dict[str, Any]] = None
@@ -61,7 +75,7 @@ class LlamaRunner:
             elif key == "top_p":
                 cli_args.extend(["--top-p", str(value)])
             elif key == "n_predict":
-                cli_args.extend(["--n-predict", str(value)])
+                cli_args.extend(["--n-predict", str(LlamaRunner._clamp_n_predict(value))])
             elif key == "threads":
                 cli_args.extend(["--threads", str(value)])
         

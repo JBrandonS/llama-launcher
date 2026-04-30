@@ -21,7 +21,6 @@ interface UISettings {
   apiAuthMethod: string;
   securitySessionTimeout: number;
   securityIpAllowlist: boolean;
-  securityTwoFactor: boolean;
   advancedDebugMode: boolean;
   advancedCustomPorts: string;
   advancedNetworkBindings: string;
@@ -54,7 +53,6 @@ const DEFAULT_SETTINGS: UISettings = {
   apiAuthMethod: 'none',
   securitySessionTimeout: 30,
   securityIpAllowlist: true,
-  securityTwoFactor: false,
   advancedDebugMode: false,
   advancedCustomPorts: '',
   advancedNetworkBindings: '127.0.0.1',
@@ -364,9 +362,9 @@ function AdvancedTab({ settings, onChange }: { settings: UISettings; onChange: (
 
       <Field label="Network bindings" desc="Interface to bind the API server to">
         <TextInput
-          value={settings.advancedNetworkBindings ?? '0.0.0.0'}
+          value={settings.advancedNetworkBindings ?? '127.0.0.1'}
           onChange={(v) => onChange({ advancedNetworkBindings: v })}
-          placeholder="0.0.0.0"
+          placeholder="127.0.0.1"
         />
       </Field>
 

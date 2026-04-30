@@ -1,11 +1,12 @@
 # backend/process_manager.py
+import logging
 import os
 import signal
 import subprocess
 import time
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Iterable, Optional, List
 
 try:
     import psutil
@@ -55,7 +56,7 @@ class ProcessManager:
         cmd.extend(['--temp', str(temp)])
         cmd.extend(['--top-k', str(top_k)])
         cmd.extend(['--top-p', str(top_p)])
-        cmd.extend(['--n-predict', str(n_predict)])
+        cmd.extend(['--n-predict', str(self._clamp_n_predict(n_predict))])
 
         log = None
         if log_file:
@@ -175,14 +176,28 @@ class ProcessManager:
                 servers[record['port']] = record
             except (json.JSONDecodeError, KeyError):
                 continue
-        detected = self._detect_llama_serve_processes()
+        detected = self._detect_llama_serve_processes(servers.keys())
         servers.update(detected)
         return servers
 
     def _pid_file(self, port: int) -> Path:
         return PID_DIR / f'{port}.json'
 
-    def _detect_llama_serve_processes(self) -> Dict[int, Dict[str, Any]]:
+
+    @staticmethod
+    def _clamp_n_predict(value: int) -> int:
+        """Clamp n_predict to llama.cpp valid range: -1 (unlimited) or 1..4096."""
+        if value == -1:
+            return value
+        if value < 1:
+            logging.warning(f"n_predict {value} < 1, clamping to 1")
+            return 1
+        if value > 4096:
+            logging.warning(f"n_predict {value} > 4096, clamping to 4096")
+            return 4096
+        return value
+
+    def _detect_llama_serve_processes(self, tracked_ports: Optional[Iterable[int]] = None) -> Dict[int, Dict[str, Any]]:
         """Scan running processes for llama.cpp/llama-serve instances not tracked by PID files.
 
         Returns a dict mapping port → info dict with pid, model, cmdline, etc.
@@ -191,7 +206,7 @@ class ProcessManager:
             return {}
 
         detected: Dict[int, Dict[str, Any]] = {}
-        tracked_ports = set(self.list_servers().keys())
+        tracked_ports = set(tracked_ports) if tracked_ports is not None else set()
 
         try:
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):

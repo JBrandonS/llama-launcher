@@ -337,10 +337,11 @@ export function DashboardPage() {
   const totalDisk = metrics?.system?.diskPercent ?? 0;
 
   const totalGpuUtil = metrics?.gpu?.utilization ?? 0;
-  const gpuMemPct =
-    metrics?.gpu && metrics.gpu.memoryTotal && metrics.gpu.memoryUsed != null
-      ? (metrics.gpu.memoryUsed / metrics.gpu.memoryTotal) * 100
-      : 0;
+  const gpuBlock = metrics?.gpu as { memoryTotal?: number; memoryUsed?: number; utilization?: number } | undefined;
+  const hasGpuData = gpuBlock != null && gpuBlock.memoryTotal != null && gpuBlock.memoryTotal > 0;
+  const gpuMemPct = hasGpuData
+    ? ((gpuBlock.memoryUsed ?? 0) / (gpuBlock.memoryTotal ?? 1)) * 100
+    : 0;
 
   const totalTokens = servers?.reduce(
     (sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0),

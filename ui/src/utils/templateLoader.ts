@@ -19,7 +19,7 @@ export interface TemplateArgs {
   mirostat_tau?: number;
   mirostat_eta?: number;
   seed?: number;
-  num_predict?: number;
+  n_predict?: number;
   num_keep?: number;
   rope_freq_scale?: number;
   batch_size?: number;

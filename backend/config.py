@@ -56,6 +56,20 @@ class LlamaConfig(BaseModel):
                 data["local_model_search_paths"] = [_expand_path(p) for p in data["local_model_search_paths"]]
         return data
 
+    @model_validator(mode="after")
+    def clamp_n_predict(self):
+        """Clamp n_predict to llama.cpp valid range: -1 (unlimited) or 1..4096."""
+        v = self.n_predict
+        if v == -1:
+            return self
+        if v < 1:
+            LOGGER.warning(f"n_predict {v} < 1, clamping to 1")
+            self.n_predict = 1
+        elif v > 4096:
+            LOGGER.warning(f"n_predict {v} > 4096, clamping to 4096")
+            self.n_predict = 4096
+        return self
+
 
 def parse_cli_args() -> Dict[str, Any]:
     parser = argparse.ArgumentParser(description="Llama Launcher Configuration Parser")

@@ -21,6 +21,7 @@ from backend.model_manager import ModelManager, scan_local_models
 from backend.process_manager import ProcessManager
 from backend.llama_runner import LlamaRunner
 from backend.logger import get_logger
+from backend import daemon as daemon_module
 
 logger = get_logger(__name__)
 
@@ -91,6 +92,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_get_daemon_status()
             elif path == "/daemon/logs":
                 self._handle_get_daemon_logs()
+            elif path == "/daemon/service":
+                self._handle_get_daemon_service()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -118,6 +121,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_post_daemon_start()
             elif path == "/daemon/stop":
                 self._handle_post_daemon_stop()
+            elif path == "/daemon/config":
+                self._handle_put_daemon_config()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -246,7 +251,7 @@ class APIHandler(BaseHTTPRequestHandler):
         temp = float(args.get("temperature") if "temperature" in args else body.get("temperature", 0.7))
         top_k = int(args.get("top_k") if "top_k" in args else body.get("top_k", 40))
         top_p = float(args.get("top_p") if "top_p" in args else body.get("top_p", 0.9))
-        n_predict = int(args.get("max_tokens") if "max_tokens" in args else body.get("n_predict", 512))
+        n_predict = int(args.get("n_predict") if "n_predict" in args else body.get("n_predict", 512))
 
         if not model_path:
             self._send_json(400, {"error": "model_path is required"})
@@ -407,11 +412,11 @@ class APIHandler(BaseHTTPRequestHandler):
             errors.append({"field": "threads", "message": "Threads must be a number"})
 
         try:
-            max_tokens = int(body.get("args", {}).get("max_tokens", 0))
-            if max_tokens < 1 or max_tokens > 4096:
-                errors.append({"field": "max_tokens", "message": "Max tokens must be between 1 and 4096"})
+            n_predict = int(body.get("args", {}).get("n_predict", 0))
+            if n_predict != -1 and (n_predict < 1 or n_predict > 4096):
+                errors.append({"field": "n_predict", "message": "Max tokens must be between 1 and 4096 (-1 = unlimited)"})
         except (ValueError, TypeError):
-            errors.append({"field": "max_tokens", "message": "Max tokens must be a number"})
+            errors.append({"field": "n_predict", "message": "Max tokens must be a number"})
 
         try:
             temp = float(body.get("args", {}).get("temperature", 0))
@@ -531,12 +536,8 @@ class APIHandler(BaseHTTPRequestHandler):
         self._send_json(200, history)
 
     def _handle_get_daemon_status(self):
-        """Get daemon status."""
-        self._send_json(200, {
-            "running": False,
-            "pid": None,
-            "port": _config.server_port if _config else 12345,
-        })
+        """Get real daemon status."""
+        self._send_json(200, daemon_module.daemon_status())
 
     def _handle_get_daemon_logs(self):
         """Get daemon logs."""
@@ -573,18 +574,49 @@ class APIHandler(BaseHTTPRequestHandler):
         total_lines = len(lines) if 'lines' in dir() else 0
         self._send_json(200, {"entries": entries, "hasMore": total_lines > limit})
 
+    def _handle_get_daemon_service(self):
+        """Return the current service file path."""
+        svc_path = daemon_module.get_service_path()
+        if svc_path is None:
+            self._send_json(200, {
+                "servicePath": None,
+                "message": "No service file generated. Start the daemon first.",
+            })
+            return
+        svc_path_obj = Path(svc_path)
+        self._send_json(200, {
+            "servicePath": svc_path,
+            "exists": svc_path_obj.exists(),
+            "content": svc_path_obj.read_text() if svc_path_obj.exists() else "",
+        })
+
     def _handle_post_daemon_start(self):
-        """Start daemon."""
-        self._send_json(200, {"status": "started"})
+        """Start the daemon: generate service file and record state."""
+        body = self._read_body()
+        if not _config:
+            _ensure_instantiated()
+        result = daemon_module.start_daemon_impl(
+            service_name=body.get("profile", "default"),
+            model_path=_config.default_model_path if _config else None,
+            port=_config.server_port if _config else 12345,
+            user=os.environ.get("USER", "root"),
+            config=body.get("config"),
+        )
+        self._send_json(200, result)
 
     def _handle_post_daemon_stop(self):
-        """Stop daemon."""
-        self._send_json(200, {"status": "stopped"})
+        """Stop the daemon."""
+        result = daemon_module.stop_daemon_impl()
+        self._send_json(200, result)
 
     def _handle_put_daemon_config(self):
         """Update daemon config."""
         body = self._read_body()
-        self._send_json(200, {"status": "updated"})
+        daemon_module._daemon_config.update(body)
+        self._send_json(200, {
+            "status": "updated",
+            "config": dict(daemon_module._daemon_config),
+        })
 
 def _iso_now():
     from datetime import datetime, timezone
