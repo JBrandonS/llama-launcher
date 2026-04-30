@@ -28,6 +28,9 @@ _config = None
 _process_manager = None
 _model_manager = None
 _runner = None
+_metrics_history: list[dict[str, Any]] = []
+_metrics_history_lock = threading.Lock()
+_MAX_METRICS_HISTORY = 500
 
 
 def _ensure_instantiated():
@@ -232,13 +235,18 @@ class APIHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         model_path = body.get("model", body.get("model_path", ""))
         port = int(body.get("port", 12345))
-        n_ctx = int(body.get("n_ctx", 2048))
-        n_gpu_layers = int(body.get("n_gpu_layers", -1))
-        threads = int(body.get("threads", 8))
-        temp = float(body.get("temperature", 0.7))
-        top_k = int(body.get("top_k", 40))
-        top_p = float(body.get("top_p", 0.9))
-        n_predict = int(body.get("n_predict", 512))
+        
+        # Read from args sub-object first (UI sends config inside args),
+        # then fall back to top-level body keys, then hardcoded defaults.
+        args = body.get("args", {})
+        # Map UI field names to backend/CLI field names
+        n_ctx = int(args.get("context_size") or body.get("n_ctx", 2048))
+        n_gpu_layers = int(args.get("gpu_layers") if "gpu_layers" in args else body.get("n_gpu_layers", -1))
+        threads = int(args.get("threads") if "threads" in args else body.get("threads", 8))
+        temp = float(args.get("temperature") if "temperature" in args else body.get("temperature", 0.7))
+        top_k = int(args.get("top_k") if "top_k" in args else body.get("top_k", 40))
+        top_p = float(args.get("top_p") if "top_p" in args else body.get("top_p", 0.9))
+        n_predict = int(args.get("max_tokens") if "max_tokens" in args else body.get("n_predict", 512))
 
         if not model_path:
             self._send_json(400, {"error": "model_path is required"})
@@ -420,27 +428,96 @@ class APIHandler(BaseHTTPRequestHandler):
         _ensure_instantiated()
         try:
             import psutil
-            metrics = {
-                "cpu_percent": psutil.cpu_percent(interval=0.1),
-                "memory_percent": psutil.virtual_memory().percent,
-                "disk_usage_percent": psutil.disk_usage("/").percent,
-                "timestamp": _iso_now(),
+            now = _iso_now()
+            vm = psutil.virtual_memory()
+            disk = psutil.disk_usage("/")
+            cpu_pct = psutil.cpu_percent(interval=0.1)
+            load_avg = list(psutil.getloadavg()) if hasattr(psutil, 'getloadavg') else [0, 0, 0]
+
+            metrics: dict[str, Any] = {
+                "timestamp": now,
+                "system": {
+                    "cpuPercent": cpu_pct,
+                    "memoryPercent": psutil.virtual_memory().percent,
+                    "memoryUsed": vm.used,
+                    "memoryTotal": vm.total,
+                    "diskPercent": disk.percent,
+                    "diskUsed": disk.used,
+                    "diskTotal": disk.total,
+                    "loadAverage": load_avg[:3],
+                },
+                "gpu": {
+                    "utilization": 0,
+                    "memoryUsed": 0,
+                    "memoryTotal": 0,
+                    "temperature": 0,
+                },
             }
+
+            # Try to get GPU metrics from llama.cpp running servers
+            try:
+                servers = _process_manager.list_servers() if _process_manager else []
+                total_gpu_mem_used = 0
+                total_gpu_mem_total = 0
+                for srv in servers:
+                    if srv.get("status") == "running" and srv.get("port"):
+                        try:
+                            import httpx
+                            resp = httpx.get(f"http://127.0.0.1:{srv['port']}/metrics", timeout=2)
+                            if resp.status_code == 200:
+                                srv_metrics = resp.json()
+                                gpu_mem = srv_metrics.get("gpu_mem_used", 0)
+                                gpu_mem_total = srv_metrics.get("gpu_mem_total", 0)
+                                if gpu_mem_total > 0:
+                                    total_gpu_mem_used += gpu_mem
+                                    total_gpu_mem_total += gpu_mem_total
+                        except Exception:
+                            pass
+                if total_gpu_mem_total > 0:
+                    metrics["gpu"]["memoryTotal"] = total_gpu_mem_total
+                    metrics["gpu"]["memoryUsed"] = total_gpu_mem_used
+                    metrics["gpu"]["utilization"] = (total_gpu_mem_used / total_gpu_mem_total) * 100
+            except Exception:
+                pass
+
+            with _metrics_history_lock:
+                _metrics_history.append(metrics)
+                if len(_metrics_history) > _MAX_METRICS_HISTORY:
+                    _metrics_history.pop(0)
+
             self._send_json(200, metrics)
         except ImportError:
-            self._send_json(200, {
-                "cpu_percent": 0,
-                "memory_percent": 0,
-                "disk_usage_percent": 0,
-                "timestamp": _iso_now(),
-            })
+            now = _iso_now()
+            fallback = {
+                "timestamp": now,
+                "system": {
+                    "cpuPercent": 0,
+                    "memoryPercent": 0,
+                    "memoryUsed": 0,
+                    "memoryTotal": 1,
+                    "diskPercent": 0,
+                    "diskUsed": 0,
+                    "diskTotal": 1,
+                    "loadAverage": [0, 0, 0],
+                },
+                "gpu": {
+                    "utilization": 0,
+                    "memoryUsed": 0,
+                    "memoryTotal": 0,
+                    "temperature": 0,
+                },
+            }
+            with _metrics_history_lock:
+                _metrics_history.append(fallback)
+                if len(_metrics_history) > _MAX_METRICS_HISTORY:
+                    _metrics_history.pop(0)
+            self._send_json(200, fallback)
         except Exception as e:
             self._send_json(500, {"error": str(e)})
 
     def _handle_get_metrics_history(self):
         """Get metrics history."""
         limit = 100
-        server_id = None
         if "?" in self.path:
             qs = self.path.split("?", 1)[1]
             for param in qs.split("&"):
@@ -449,10 +526,9 @@ class APIHandler(BaseHTTPRequestHandler):
                         limit = int(param.split("=", 1)[1])
                     except ValueError:
                         pass
-                elif param.startswith("server="):
-                    server_id = param.split("=", 1)[1]
-        # Return empty history (would need persistence for real history)
-        self._send_json(200, [])
+        with _metrics_history_lock:
+            history = list(_metrics_history[-limit:])
+        self._send_json(200, history)
 
     def _handle_get_daemon_status(self):
         """Get daemon status."""

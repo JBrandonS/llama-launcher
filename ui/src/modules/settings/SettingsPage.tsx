@@ -53,11 +53,11 @@ const DEFAULT_SETTINGS: UISettings = {
   apiBackendUrl: 'http://localhost:8501',
   apiAuthMethod: 'none',
   securitySessionTimeout: 30,
-  securityIpAllowlist: false,
+  securityIpAllowlist: true,
   securityTwoFactor: false,
   advancedDebugMode: false,
   advancedCustomPorts: '',
-  advancedNetworkBindings: '0.0.0.0',
+  advancedNetworkBindings: '127.0.0.1',
 };
 
 // ─── Form field helpers ───────────────────────────────────────────
@@ -82,7 +82,7 @@ function TextInput({ value, onChange, placeholder, type = 'text' }: {
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
     />
   );
 }
@@ -102,7 +102,7 @@ function NumberInput({ value, onChange, min, max }: {
         if (max !== undefined && n > max) return;
         onChange(n);
       }}
-      className="h-9 w-28 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="h-9 w-28 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
     />
   );
 }
@@ -114,7 +114,7 @@ function SelectInput({ value, onChange, options }: {
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>{o.label}</option>
@@ -330,19 +330,12 @@ function SecurityTab({ settings, onChange }: { settings: UISettings; onChange: (
         />
       </Row>
 
-      <Row label="Two-factor authentication">
-        <Switch
-          checked={settings.securityTwoFactor ?? false}
-          onCheckedChange={(v) => onChange({ securityTwoFactor: v })}
-          label="Toggle 2FA"
-        />
-      </Row>
-
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
-        <h4 className="text-sm font-medium text-amber-600">Security warning</h4>
-        <p className="mt-1 text-xs text-muted-foreground">
-          These settings affect how users authenticate to the backend API.
-          Changes take effect after the next page load.
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+        <h4 className="text-sm font-medium text-destructive">Security warning</h4>
+        <p className="text-xs text-destructive/80">
+          <strong>This project is NOT secure.</strong> It was vibe-coded as a test using local LLMs (Qwen 3.6, OpenCode, oh-my-openagent).
+          Only an absolute fool would consider this project secure in any way. Do not expose it to untrusted networks.
+          IP allowlist and localhost-only bindings are recommended defaults.
         </p>
       </div>
     </div>

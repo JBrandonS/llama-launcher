@@ -292,7 +292,7 @@ export function CollapsibleSection({
   section: SectionDef;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const Icon = section.icon;
 
   return (

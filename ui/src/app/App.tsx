@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@utils/cn';
@@ -23,10 +23,27 @@ const loading = (
 );
 
 export default function App() {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('launcher:sidebar-collapsed') === 'true';
+    } catch { return false; }
+  });
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('launcher:sidebar-collapsed', String(next)); } catch {}
+      return next;
+    });
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <Sidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+      <div className={cn(
+        'flex flex-1 flex-col overflow-hidden transition-all duration-200',
+        sidebarCollapsed ? 'ml-16' : 'ml-56'
+      )}>
         <TopBar />
         <main className={cn('flex-1 overflow-y-auto p-4 md:p-6')}>
           <Suspense fallback={loading}>

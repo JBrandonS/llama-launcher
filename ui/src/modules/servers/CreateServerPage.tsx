@@ -8,21 +8,20 @@ import {
   Server,
   Cpu,
   Settings,
-  Check,
-  ChevronRight,
-  ChevronLeft,
   AlertCircle,
-  Trash2,
-  Play,
-  Shield,
   Hash,
   Database,
-  Layers,
   FileSearch,
+  ChevronDown,
+  ChevronUp,
+  ChevronRight,
+  Check,
+  Layers,
 } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
 import type { LaunchConfig, Settings as AppSettings } from '@services/types';
+import { CollapsibleSection } from '@components/common/CollapsibleSection';
 
 interface Preset {
   id: string;
@@ -41,7 +40,7 @@ const PRESETS: Preset[] = [
     id: 'low-memory',
     name: 'Low Memory',
     description: 'Minimal VRAM usage, fast context switching',
-    icon: Shield,
+    icon: Server,
     gpu_layers: 0,
     context_size: 512,
     threads: 2,
@@ -52,7 +51,7 @@ const PRESETS: Preset[] = [
     id: 'balanced',
     name: 'Balanced',
     description: 'Default trade-off between speed and quality',
-    icon: Layers,
+    icon: Cpu,
     gpu_layers: -1,
     context_size: 4096,
     threads: 4,
@@ -70,41 +69,18 @@ const PRESETS: Preset[] = [
     max_tokens: 1024,
     temperature: 0.7,
   },
+  {
+    id: 'cpu-only',
+    name: 'CPU Only',
+    description: 'CPU-only GGUF model (e.g. SmolLM2-1.7B)',
+    icon: Settings,
+    gpu_layers: 0,
+    context_size: 2048,
+    threads: 4,
+    max_tokens: 512,
+    temperature: 0.7,
+  },
 ];
-
-// ─── Step Definitions ─────────────────────────────────────────────
-
-interface StepDef {
-  id: number;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-const STEPS: StepDef[] = [
-  { id: 1, label: 'Identity', icon: Server },
-  { id: 2, label: 'Model', icon: FileSearch },
-  { id: 3, label: 'Runtime', icon: Cpu },
-  { id: 4, label: 'Review', icon: Check },
-];
-
-type FieldError = string | undefined;
-
-interface IdentityErrors {
-  name: FieldError;
-  port: FieldError;
-}
-
-interface ModelErrors {
-  path: FieldError;
-}
-
-interface RuntimeErrors {
-  gpu_layers: FieldError;
-  context_size: FieldError;
-  threads: FieldError;
-  max_tokens: FieldError;
-  temperature: FieldError;
-}
 
 // ─── Input Component ──────────────────────────────────────────────
 

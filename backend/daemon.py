@@ -1,6 +1,8 @@
 # backend/daemon.py
+import os
 import threading
 import time
+from pathlib import Path
 from typing import Optional, Callable, List
 
 class Daemon:
@@ -67,6 +69,15 @@ def reload_daemon() -> None:
     if _global_daemon:
         _global_daemon.reload()
 
+SERVICE_DIR = Path.home() / '.llama_launcher' / 'services'
+
+
+def get_service_file_path(service_name: str) -> Path:
+    """Return the path where the systemd service file will be written."""
+    SERVICE_DIR.mkdir(parents=True, exist_ok=True)
+    return SERVICE_DIR / f'{service_name}.service'
+
+
 def generate_systemd_service(
     service_name: str,
     description: str,
@@ -74,7 +85,6 @@ def generate_systemd_service(
     after: str = "network.target",
     user: str = "root"
 ) -> str:
-    """Generate a systemd service file."""
     return f"""[Unit]
 Description={description}
 After={after}

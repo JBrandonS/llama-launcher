@@ -7,6 +7,11 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 
 PID_DIR = Path.home() / '.llama_launcher' / 'pids'
 
@@ -170,7 +175,66 @@ class ProcessManager:
                 servers[record['port']] = record
             except (json.JSONDecodeError, KeyError):
                 continue
+        detected = self._detect_llama_serve_processes()
+        servers.update(detected)
         return servers
 
     def _pid_file(self, port: int) -> Path:
         return PID_DIR / f'{port}.json'
+
+    def _detect_llama_serve_processes(self) -> Dict[int, Dict[str, Any]]:
+        """Scan running processes for llama.cpp/llama-serve instances not tracked by PID files.
+
+        Returns a dict mapping port → info dict with pid, model, cmdline, etc.
+        """
+        if psutil is None:
+            return {}
+
+        detected: Dict[int, Dict[str, Any]] = {}
+        tracked_ports = set(self.list_servers().keys())
+
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmdline = proc.info.get('cmdline') or []
+                    if not cmdline:
+                        continue
+                    cmdline_str = ' '.join(str(c) for c in cmdline).lower()
+                    if not any(kw in cmdline_str for kw in ['llama-server', 'llama.cpp', 'llama_cpp']):
+                        continue
+
+                    pid = proc.info['pid']
+                    if pid == os.getpid():
+                        continue
+
+                    port = None
+                    model = None
+                    for i, arg in enumerate(cmdline):
+                        arg_str = str(arg)
+                        if arg_str == '--port' and i + 1 < len(cmdline):
+                            try:
+                                port = int(cmdline[i + 1])
+                            except (ValueError, IndexError):
+                                pass
+                        elif arg_str == '--model' and i + 1 < len(cmdline):
+                            model = str(cmdline[i + 1])
+
+                    if port is None:
+                        continue
+
+                    if port not in tracked_ports:
+                        detected[port] = {
+                            'pid': pid,
+                            'model': model,
+                            'cmdline': cmdline,
+                            'status': 'detected',
+                            'tracked': False,
+                            'name': proc.info.get('name'),
+                            'create_time': proc.create_time(),
+                        }
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            pass
+
+        return detected

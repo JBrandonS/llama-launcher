@@ -16,7 +16,7 @@ from backend.process_manager import ProcessManager
 from backend.download import download_model as hf_download
 from backend.config_store import ConfigStore, ConfigItem
 from backend.benchmark import run_benchmark as bench_run
-from backend.daemon import start_daemon, stop_daemon, _global_daemon, generate_systemd_service
+from backend.daemon import start_daemon, stop_daemon, _global_daemon, generate_systemd_service, get_service_file_path
 
 
 @click.group()
@@ -488,7 +488,7 @@ def daemon_start(name, port):
             user=os.environ.get('USER', 'root'),
         )
 
-        service_path = Path("/tmp/llama-daemon.service")
+        service_path = get_service_file_path(f'llama-daemon-{name}')
         with open(service_path, 'w') as f:
             f.write(service_content)
 

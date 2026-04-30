@@ -1,0 +1,19 @@
+When trying to launch a server I am receiving error:Max tokens must be between 1 and 4096
+    By doing a websearch find a small local model that can be ran on cpu only, use huggingface and ensure this is a gguf model. Create a custom template for this model and ensure that the custom template code renders and that the model can be run. Make this a part of the testing.
+
+By default on the launch page have the setting collapsed.
+
+The Dashboard is not correcly showing the usage or utiliztions for anything
+
+Ensure the servers script will work and have it also pickup locally running llama-serve processes.
+
+The deamon code is not working either. Also have a method to show what service file the daemon will install.
+
+Under the settings panel, in dark mode the drop downs have white background with white text. Fix that.
+
+For the security the ip allowlist should default to being enabled and the service should only allow local connections. Remove the two-factor. 
+Add to the secutiry warning that this project should NOT be trusted to be secure in any way.
+
+make the side bar collapasable. 
+
+Finally add a README.md for this project to explain what it is. Add to this reme that this project has been vibe-coded as a test. That most, but not all, prompts used can be found in the prompts/ folder and that only an absolute fool would consider this project secure in anyway. This project was made using local LLMS mostly QWEN3.6, in opencode with oh-my-openagent.
