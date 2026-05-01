@@ -147,3 +147,10 @@ Add "Quick Launch" link to Sidebar component:
 - `ui/src/services/apiService.ts` — Add config API methods
 - `ui/src/services/types.ts` — Add ServerConfig type
 - `ui/src/components/common/Sidebar.tsx` — Add Quick Launch navigation link
+
+## 11. Final steps
+
+Once done with these improvements commit to git. 
+Then, fix all errors including pre existing typing errors and ensure all test pass, even those that previously failed. 
+Ensure all requirements are at the latest versions and properly listed where needed and the pyproject is setup to correctly install. 
+Finally commit to git again.

@@ -39,6 +39,49 @@ class ModelRegistry:
     def clear(self):
         self._models.clear()
 
+    def add_model(self, model_id: str, path: Path, metadata: Optional[Dict] = None):
+        """Manually register a model."""
+        self.register(model_id, path, metadata)
+
+    def update_model(self, model_id: str, metadata: Optional[Dict] = None) -> bool:
+        """Update metadata for an existing model."""
+        if model_id not in self._models:
+            return False
+        if metadata is not None:
+            self._models[model_id]["metadata"] = metadata
+        return True
+
+    def delete_model(self, model_id: str) -> bool:
+        """Remove a model from the registry."""
+        if model_id not in self._models:
+            return False
+        del self._models[model_id]
+        return True
+
+    def get_model_types(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Group models by their detected type."""
+        groups: Dict[str, List[Dict[str, Any]]] = {"local": [], "huggingface": [], "template": []}
+        for model_id, info in self._models.items():
+            model_type = self._detect_model_type(model_id, info)
+            groups.setdefault(model_type, []).append({
+                "id": model_id,
+                "path": str(info["path"]),
+                "metadata": info.get("metadata"),
+            })
+        return groups
+
+    @staticmethod
+    def _detect_model_type(model_id: str, info: Dict[str, Any]) -> str:
+        """Detect model type from ID and path."""
+        path_str = str(info["path"]).lower()
+        # Template reference: looks like a template name (no path separator, no .gguf)
+        if "/" not in model_id and ":" not in model_id and not path_str.endswith(".gguf"):
+            return "template"
+        # HuggingFace identifier
+        if "/" in model_id or "huggingface" in path_str or "hf" in path_str:
+            return "huggingface"
+        return "local"
+
 
 class ModelManager:
     """Handles detection and retrieval of local and remote models."""

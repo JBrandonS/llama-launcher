@@ -15,6 +15,8 @@ const DaemonPage = lazy(() => import('@modules/daemon/DaemonPage').then(m => ({ 
 const LogsPage = lazy(() => import('@modules/logs/LogsPage').then(m => ({ default: m.LogsPage })));
 const SettingsPage = lazy(() => import('@modules/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const LaunchPage = lazy(() => import('@modules/launch/LaunchPage').then(m => ({ default: m.LaunchPage })));
+const QuickLauncherPage = lazy(() => import('@modules/launch/QuickLauncherPage').then(m => ({ default: m.QuickLauncherPage })));
+const ModelsPage = lazy(() => import('@modules/models/ModelsPage').then(m => ({ default: m.ModelsPage })));
 
 const loading = (
   <div className="flex h-full items-center justify-center">
@@ -68,6 +70,12 @@ export default function App() {
               } />
               <Route path="/launch" element={
                 <ErrorBoundary><LaunchPage /></ErrorBoundary>
+              } />
+              <Route path="/launch/quick" element={
+                <ErrorBoundary><QuickLauncherPage /></ErrorBoundary>
+              } />
+              <Route path="/models" element={
+                <ErrorBoundary><ModelsPage /></ErrorBoundary>
               } />
               <Route path="/settings" element={
                 <ErrorBoundary><SettingsPage /></ErrorBoundary>

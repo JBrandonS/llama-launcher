@@ -1,18 +1,23 @@
 import type {
   ApiResponse,
+  AddModelRequest,
   DaemonConfig,
   DaemonInfo,
   DownloadModelRequest,
   DownloadModelResponse,
+  GpuMetricsResponse,
   LaunchConfig,
   LaunchResponse,
   LogStreamResponse,
   ModelInfo,
   ModelQuantizationsResponse,
   ModelResolveResponse,
+  ModelTypeGroup,
+  ServerConfig,
   ServerInfo,
   Settings,
   SystemMetrics,
+  UpdateModelRequest,
   ValidationError,
 } from './types';
 
@@ -71,6 +76,14 @@ export const apiService = {
     return res.ok ? (res.data as LaunchResponse) : { serverId: '', message: '' };
   },
 
+  async getLaunchPreview(modelPath: string, args: Record<string, unknown>): Promise<{ command: string }> {
+    const res = await request<{ command: string }>('/launch/preview', {
+      method: 'POST',
+      body: JSON.stringify({ model: modelPath, args }),
+    });
+    return res.ok ? (res.data as { command: string }) : { command: '' };
+  },
+
   async stopServer(id: string): Promise<boolean> {
     const res = await request(`/servers/${id}/stop`, { method: 'POST' });
     return res.ok;
@@ -110,6 +123,32 @@ export const apiService = {
     return res.ok ? (res.data as DownloadModelResponse) : null;
   },
 
+  async addModel(payload: AddModelRequest): Promise<ModelInfo | null> {
+    const res = await request<ModelInfo>('/models', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return res.ok ? (res.data as ModelInfo) : null;
+  },
+
+  async updateModel(id: string, payload: UpdateModelRequest): Promise<boolean> {
+    const res = await request(`/models/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return res.ok;
+  },
+
+  async deleteModel(id: string): Promise<boolean> {
+    const res = await request(`/models/${id}`, { method: 'DELETE' });
+    return res.ok;
+  },
+
+  async getModelTypes(): Promise<ModelTypeGroup[]> {
+    const res = await request<ModelTypeGroup[]>('/models/types');
+    return res.ok ? (res.data as ModelTypeGroup[]) : [];
+  },
+
   // ── Metrics ─────────────────────────────────────────────────
   async getMetrics(serverId?: string): Promise<SystemMetrics | null> {
     const url = serverId
@@ -128,6 +167,11 @@ export const apiService = {
       : `/metrics/history?limit=${limit}`;
     const res = await request<SystemMetrics[]>(url);
     return res.ok ? (res.data as SystemMetrics[]) : [];
+  },
+
+  async getGpuMetrics(): Promise<GpuMetricsResponse | null> {
+    const res = await request<GpuMetricsResponse>('/metrics/gpu');
+    return res.ok ? (res.data as GpuMetricsResponse) : null;
   },
 
   // ── Daemon ──────────────────────────────────────────────────
@@ -206,5 +250,29 @@ export const apiService = {
     );
     if (res.ok) return res.data as { valid: boolean; errors: ValidationError[] };
     return { valid: false, errors: [{ field: 'server', message: 'Validation failed' }] };
+  },
+
+  // ── Quick Launch ────────────────────────────────────────────
+  async validateConfig(config: ServerConfig): Promise<{
+    valid: boolean;
+    errors: ValidationError[];
+  }> {
+    const res = await request<{ valid: boolean; errors: ValidationError[] }>(
+      '/validate/config',
+      {
+        method: 'POST',
+        body: JSON.stringify({ config }),
+      }
+    );
+    if (res.ok) return res.data as { valid: boolean; errors: ValidationError[] };
+    return { valid: false, errors: [{ field: 'server', message: 'Validation failed' }] };
+  },
+
+  async launchFromConfig(config: ServerConfig): Promise<LaunchResponse> {
+    const res = await request<LaunchResponse>('/run/config', {
+      method: 'POST',
+      body: JSON.stringify({ config }),
+    });
+    return res.ok ? (res.data as LaunchResponse) : { serverId: '', message: '' };
   },
 };

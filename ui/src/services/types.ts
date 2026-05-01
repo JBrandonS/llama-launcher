@@ -40,6 +40,8 @@ export interface QuantizationInfo {
   isRecommended?: boolean;
 }
 
+export type ModelType = 'local' | 'huggingface' | 'template';
+
 export interface ModelInfo {
   id: string;
   path: string;
@@ -47,8 +49,25 @@ export interface ModelInfo {
   size_human: string;
   last_modified: string;
   tags: string[];
+  type?: ModelType;
   aliases?: string[];
   quantizations?: QuantizationInfo[];
+}
+
+export interface ModelTypeGroup {
+  type: string;
+  models: ModelInfo[];
+}
+
+export interface AddModelRequest {
+  path: string;
+  name?: string;
+  aliases?: string[];
+}
+
+export interface UpdateModelRequest {
+  name?: string;
+  aliases?: string[];
 }
 
 export interface ModelResolveResponse {
@@ -78,6 +97,7 @@ export interface SystemMetrics {
   timestamp: string;
   system?: SystemResources;
   gpu?: GPUResources;
+  gpuAvailable?: boolean;
   serverId?: string;
 }
 
@@ -97,6 +117,32 @@ export interface GPUResources {
   memoryUsed?: number;
   memoryTotal?: number;
   temperature?: number;
+  powerUsage?: number;
+  powerLimit?: number;
+  fanSpeed?: number;
+  name?: string;
+}
+
+// ─── GPU Metrics Types (from /metrics/gpu endpoint) ────────────
+export interface GpuMetricsResponse {
+  gpuAvailable: boolean;
+  backend: string;
+  gpus: GpuDetail[];
+  aggregate?: {
+    memoryUsed?: number;
+    memoryTotal?: number;
+    utilization?: number;
+    temperature?: number;
+  };
+}
+
+export interface GpuDetail {
+  name: string;
+  index: number;
+  utilization: number;
+  memoryUsed: number;
+  memoryTotal: number;
+  temperature: number;
   powerUsage?: number;
   powerLimit?: number;
   fanSpeed?: number;
@@ -203,4 +249,13 @@ export type ErrorType =
 export interface ValidationError {
   field: string;
   message: string;
+}
+
+// ─── Config File Types ─────────────────────────────────────────
+export interface ServerConfig {
+  name?: string;
+  model: string;
+  port: number;
+  args?: Record<string, unknown>;
+  env?: Record<string, string>;
 }

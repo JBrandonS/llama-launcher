@@ -9,6 +9,8 @@ import {
   Settings,
   Cpu,
   Rocket,
+  Database,
+  Zap,
   Menu,
   X,
   ChevronLeft,
@@ -17,8 +19,10 @@ import {
 
 const navItems = [
   { to: '/launch', label: 'Launch', icon: Rocket },
+  { to: '/launch/quick', label: 'Quick Launch', icon: Zap },
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/servers', label: 'Servers', icon: Server },
+  { to: '/models', label: 'Models', icon: Database },
   { to: '/daemon', label: 'Daemon', icon: Activity },
   { to: '/logs', label: 'Logs', icon: Terminal },
   { to: '/settings', label: 'Settings', icon: Settings },

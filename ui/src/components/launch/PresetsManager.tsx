@@ -27,6 +27,25 @@ interface PresetValue {
   grammar_file?: string;
   batch_size?: number;
   cache_reuse?: number;
+
+  // New fields
+  host?: string;
+  cors?: boolean;
+  cors_allow_origin?: string;
+  api_key?: string;
+  flash_attn?: string;
+  no_mmap?: boolean;
+  mlock?: boolean;
+  numa?: string;
+  cont_batching?: boolean;
+  rope_scaling?: string;
+  rope_freq_base?: number;
+  embedding?: boolean;
+  logits_all?: boolean;
+  speculative?: boolean;
+  draft_model?: string;
+  prompt_cache?: string;
+  keep_live?: number;
 }
 
 export interface Preset {

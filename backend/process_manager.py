@@ -92,41 +92,146 @@ class ProcessManager:
 
     def stop_server(self, port: int) -> Dict[str, Any]:
         pid_file = self._pid_file(port)
-        if not pid_file.exists():
-            return {'status': 'not_running', 'port': port}
+        record = None
 
+        # Try reading PID file first
+        if pid_file.exists():
+            try:
+                with open(pid_file) as f:
+                    record = json.load(f)
+            except (json.JSONDecodeError, KeyError):
+                record = None
+                logging.warning("Invalid PID file for port %d, searching by process", port)
+
+        pid = None
+        stopped_by = "unknown"
+
+        if record and 'pid' in record:
+            pid = record['pid']
+            graceful = self._kill_process(pid, port)
+            stopped_by = "stopped" if graceful else "killed"
+
+        # Fallback: if no PID or process already gone, search by command-line args
+        if pid is None or not self._is_process_alive(pid):
+            found = self._find_process_by_port(port)
+            if found:
+                pid = found['pid']
+                graceful = self._kill_process(pid, port)
+                stopped_by = "stopped" if graceful else "killed"
+                logging.info(
+                    "Stopped server on port %d via process search (PID %d)",
+                    port, pid
+                )
+
+        # Clean up PID file and log file
+        pid_file.unlink(missing_ok=True)
+        if record and record.get('log_file'):
+            log_path = Path(record['log_file'])
+            if log_path.exists():
+                try:
+                    log_path.unlink()
+                except OSError:
+                    pass
+
+        status = stopped_by if pid else 'not_running'
+        result = {'status': status, 'port': port}
+        if pid:
+            result['pid'] = pid
+
+        logging.info("Stop result for port %d: %s", port, result)
+        return result
+
+    @staticmethod
+    def _is_process_alive(pid: int) -> bool:
+        """Check if a process is still running."""
         try:
-            with open(pid_file) as f:
-                record = json.load(f)
-        except (json.JSONDecodeError, KeyError):
-            return {'status': 'invalid_pid_file', 'port': port}
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
 
-        pid = record['pid']
+    @staticmethod
+    def _kill_process(pid: int, port: int) -> bool:
+        """Send SIGTERM, wait, then SIGKILL if needed. Returns True if graceful."""
         graceful = False
         try:
             os.kill(pid, signal.SIGTERM)
             for _ in range(20):
                 time.sleep(0.25)
-                try:
-                    os.kill(pid, 0)
-                except OSError:
+                if not ProcessManager._is_process_alive(pid):
                     graceful = True
                     break
             if not graceful:
                 os.kill(pid, signal.SIGKILL)
                 time.sleep(0.2)
+                graceful = not ProcessManager._is_process_alive(pid)
         except ProcessLookupError:
             graceful = True
+        except PermissionError:
+            logging.warning("Permission denied killing PID %d on port %d", pid, port)
 
-        pid_file.unlink(missing_ok=True)
-        log_file = record.get('log_file')
-        if log_file and Path(log_file).exists():
-            try:
-                Path(log_file).unlink()
-            except OSError:
-                pass
+        return graceful
 
-        return {'status': 'stopped' if graceful else 'killed', 'port': port, 'pid': pid}
+    def _find_process_by_port(self, port: int) -> Optional[Dict[str, Any]]:
+        """Find a running llama.cpp process listening on the given port.
+
+        Returns the process info dict or None.
+        """
+        if psutil is None:
+            return None
+
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmdline = proc.info.get('cmdline') or []
+                    if not cmdline:
+                        continue
+
+                    # Check if this is a llama.cpp process
+                    cmdline_str = ' '.join(str(c) for c in cmdline).lower()
+                    if not any(kw in cmdline_str for kw in ['llama-server', 'llama.cpp', 'llama_cpp']):
+                        continue
+
+                    # Check if it's the right port
+                    for i, arg in enumerate(cmdline):
+                        if str(arg) == '--port' and i + 1 < len(cmdline):
+                            try:
+                                if int(cmdline[i + 1]) == port:
+                                    return {
+                                        'pid': proc.info['pid'],
+                                        'model': self._extract_model(cmdline),
+                                        'cmdline': cmdline,
+                                    }
+                            except (ValueError, IndexError):
+                                pass
+
+                    # Also check for processes with socket on this port
+                    try:
+                        connections = psutil.Process(proc.info['pid']).connections()
+                        for conn in connections:
+                            if conn.status == 'LISTEN' and conn.laddr.port == port:
+                                return {
+                                    'pid': proc.info['pid'],
+                                    'model': self._extract_model(cmdline),
+                                    'cmdline': cmdline,
+                                }
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            pass
+
+        return None
+
+    @staticmethod
+    def _extract_model(cmdline: List[str]) -> Optional[str]:
+        """Extract model path from command-line arguments."""
+        for i, arg in enumerate(cmdline):
+            if str(arg) == '--model' and i + 1 < len(cmdline):
+                return str(cmdline[i + 1])
+        return None
 
     def status(self, port: Optional[int] = None) -> Dict[str, Any]:
         if port is not None:

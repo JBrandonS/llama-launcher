@@ -31,6 +31,14 @@ vi.mock('@services/apiService', () => ({
     getModels: vi.fn(),
     launchServer: vi.fn(),
     validateLaunchConfig: vi.fn(),
+    getGpuMetrics: vi.fn(),
+    getLaunchPreview: vi.fn(),
+    addModel: vi.fn(),
+    updateModel: vi.fn(),
+    deleteModel: vi.fn(),
+    getModelTypes: vi.fn(),
+    validateConfig: vi.fn(),
+    launchFromConfig: vi.fn(),
   },
 }));
 

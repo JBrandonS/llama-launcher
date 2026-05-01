@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, FolderOpen, Download, Sparkles } from 'lucide-react';
+import { ArrowLeft, Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, FolderOpen, Download, Sparkles, Globe, Terminal, Copy, Loader2 } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
 import type { ServerInfo, Settings as SettingsType, ValidationError, ModelInfo, QuantizationInfo } from '@services/types';
@@ -17,9 +17,10 @@ import {
   SliderInput,
   NumberInput,
   SelectInput,
+  Toggle,
 } from '@components/launch/ParameterForm';
 
-interface PresetFormData {
+interface LaunchFormState {
   gpu_layers: number;
   context_size: number;
   threads: number;
@@ -43,9 +44,28 @@ interface PresetFormData {
   grammar_file: string;
   batch_size: number;
   cache_reuse: number;
+
+  // New fields
+  host: string;
+  cors: boolean;
+  cors_allow_origin: string;
+  api_key: string;
+  flash_attn: string; // "on" | "off" | "auto"
+  no_mmap: boolean;
+  mlock: boolean;
+  numa: string; // "distribute" | "isolate" | "numactl"
+  cont_batching: boolean;
+  rope_scaling: string; // "none" | "linear" | "yarn"
+  rope_freq_base: number;
+  embedding: boolean;
+  logits_all: boolean;
+  speculative: boolean;
+  draft_model: string;
+  prompt_cache: string;
+  keep_live: number;
 }
 
-const DEFAULT_FORM: PresetFormData = {
+const DEFAULT_FORM: LaunchFormState = {
   gpu_layers: -1,
   context_size: 0,
   threads: 0,
@@ -69,10 +89,29 @@ const DEFAULT_FORM: PresetFormData = {
   grammar_file: '',
   batch_size: 2048,
   cache_reuse: 0,
+
+  // New defaults
+  host: '127.0.0.1',
+  cors: false,
+  cors_allow_origin: '',
+  api_key: '',
+  flash_attn: 'auto',
+  no_mmap: false,
+  mlock: false,
+  numa: '',
+  cont_batching: false,
+  rope_scaling: 'none',
+  rope_freq_base: 1000000,
+  embedding: false,
+  logits_all: false,
+  speculative: false,
+  draft_model: '',
+  prompt_cache: '',
+  keep_live: 0,
 };
 
 function validateForm(
-  formData: PresetFormData,
+  formData: LaunchFormState,
   modelPath: string,
   port: number | null
 ): ValidationError[] {
@@ -116,6 +155,19 @@ function validateForm(
   if (formData.seed < -1) {
     errors.push({ field: 'seed', message: 'Seed must be >= -1' });
   }
+  // New field validations
+  if (formData.host && !/^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$/.test(formData.host) && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(formData.host)) {
+    errors.push({ field: 'host', message: 'Invalid host address' });
+  }
+  if (formData.cors_allow_origin && formData.cors_allow_origin !== '*' && !/^https?:\/\//.test(formData.cors_allow_origin)) {
+    errors.push({ field: 'cors_allow_origin', message: 'CORS origin must start with http:// or https:// or be *' });
+  }
+  if (formData.rope_freq_base < 0) {
+    errors.push({ field: 'rope_freq_base', message: 'RoPE freq base must be non-negative' });
+  }
+  if (formData.keep_live < 0) {
+    errors.push({ field: 'keep_live', message: 'Keep live must be non-negative' });
+  }
 
   return errors;
 }
@@ -145,6 +197,30 @@ const PARAMETER_SECTIONS: SectionDef[] = [
     description: 'Mirostat, grammar, batch size, rope scale',
     icon: (props) => <Settings2 className={cn(props.className)} />,
   },
+  {
+    id: 'network',
+    title: 'Network',
+    description: 'Host, CORS, API key',
+    icon: (props) => <Globe className={cn(props.className)} />,
+  },
+  {
+    id: 'performance',
+    title: 'Performance',
+    description: 'Flash attention, memory, NUMA',
+    icon: (props) => <Zap className={cn(props.className)} />,
+  },
+  {
+    id: 'rope',
+    title: 'RoPE',
+    description: 'Frequency scaling, YaRN',
+    icon: (props) => <Settings2 className={cn(props.className)} />,
+  },
+  {
+    id: 'advanced-2',
+    title: 'Advanced',
+    description: 'Embedding, speculative, cache',
+    icon: (props) => <Cpu className={cn(props.className)} />,
+  },
 ];
 
 // ─── Known aliases for suggestions ───────────────────────────────
@@ -166,7 +242,7 @@ export function LaunchPage() {
 
   const [selectedModelPath, setSelectedModelPath] = useState('');
   const [port, setPort] = useState<number | null>(null);
-  const [form, setForm] = useState<PresetFormData>({ ...DEFAULT_FORM });
+  const [form, setForm] = useState<LaunchFormState>({ ...DEFAULT_FORM });
   const [selectedPreset, setSelectedPreset] = useState('balanced');
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
@@ -184,6 +260,37 @@ export function LaunchPage() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<string>('');
   const hfInputRef = useRef<HTMLInputElement>(null);
+  const [previewCommand, setPreviewCommand] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const getPreview = useCallback(async () => {
+    if (!selectedModelPath) {
+      setPreviewCommand(null);
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const result = await apiService.getLaunchPreview(selectedModelPath, form as unknown as Record<string, unknown>);
+      setPreviewCommand(result.command);
+    } catch {
+      setPreviewCommand(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [selectedModelPath, form]);
+
+  useEffect(() => {
+    const timer = setTimeout(getPreview, 300);
+    return () => clearTimeout(timer);
+  }, [getPreview]);
+
+  const copyCommand = useCallback(() => {
+    if (!previewCommand) return;
+    navigator.clipboard.writeText(previewCommand);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [previewCommand]);
 
   const { data: servers } = useQuery({
     queryKey: ['servers'],
@@ -323,7 +430,7 @@ export function LaunchPage() {
   }, [modelDropdownOpen]);
 
   const updateField = useCallback(
-    <K extends keyof PresetFormData>(key: K, value: PresetFormData[K]) => {
+    <K extends keyof LaunchFormState>(key: K, value: LaunchFormState[K]) => {
       setForm((prev) => ({ ...prev, [key]: value }));
     },
     []
@@ -356,6 +463,23 @@ export function LaunchPage() {
         grammar_file = DEFAULT_FORM.grammar_file,
         batch_size = DEFAULT_FORM.batch_size,
         cache_reuse = DEFAULT_FORM.cache_reuse,
+        host = DEFAULT_FORM.host,
+        cors = DEFAULT_FORM.cors,
+        cors_allow_origin = DEFAULT_FORM.cors_allow_origin,
+        api_key = DEFAULT_FORM.api_key,
+        flash_attn = DEFAULT_FORM.flash_attn,
+        no_mmap = DEFAULT_FORM.no_mmap,
+        mlock = DEFAULT_FORM.mlock,
+        numa = DEFAULT_FORM.numa,
+        cont_batching = DEFAULT_FORM.cont_batching,
+        rope_scaling = DEFAULT_FORM.rope_scaling,
+        rope_freq_base = DEFAULT_FORM.rope_freq_base,
+        embedding = DEFAULT_FORM.embedding,
+        logits_all = DEFAULT_FORM.logits_all,
+        speculative = DEFAULT_FORM.speculative,
+        draft_model = DEFAULT_FORM.draft_model,
+        prompt_cache = DEFAULT_FORM.prompt_cache,
+        keep_live = DEFAULT_FORM.keep_live,
       } = preset.values;
 
       setForm({
@@ -382,27 +506,48 @@ export function LaunchPage() {
         grammar_file,
         batch_size,
         cache_reuse,
+        host,
+        cors,
+        cors_allow_origin,
+        api_key,
+        flash_attn,
+        no_mmap,
+        mlock,
+        numa,
+        cont_batching,
+        rope_scaling,
+        rope_freq_base,
+        embedding,
+        logits_all,
+        speculative,
+        draft_model,
+        prompt_cache,
+        keep_live,
       });
     },
     []
   );
 
-  const KNOWN_FORM_FIELDS: Set<keyof PresetFormData> = new Set([
+  const KNOWN_FORM_FIELDS: Set<keyof LaunchFormState> = new Set([
     'gpu_layers', 'context_size', 'threads', 'temp', 'top_k', 'top_p',
     'min_p', 'typical_p', 'penalty_range', 'repeat_penalty', 'repeat_last_n',
     'presence_penalty', 'frequency_penalty', 'mirostat', 'mirostat_tau',
     'mirostat_eta', 'seed', 'n_predict', 'num_keep', 'rope_freq_scale',
     'grammar_file', 'batch_size', 'cache_reuse',
+    'host', 'cors', 'cors_allow_origin', 'api_key', 'flash_attn',
+    'no_mmap', 'mlock', 'numa', 'cont_batching', 'rope_scaling',
+    'rope_freq_base', 'embedding', 'logits_all', 'speculative',
+    'draft_model', 'prompt_cache', 'keep_live',
   ]);
 
   const applyTemplateArgs = useCallback((template: ReturnType<typeof TemplateLoader.getDefaultTemplate>) => {
     if (!template) return;
     const args = template.args;
 
-    const newForm: Partial<PresetFormData> = {};
+    const newForm: Partial<LaunchFormState> = {};
 
     for (const [key, value] of Object.entries(args)) {
-      if (KNOWN_FORM_FIELDS.has(key as keyof PresetFormData)) {
+      if (KNOWN_FORM_FIELDS.has(key as keyof LaunchFormState)) {
         (newForm as Record<string, unknown>)[key] = value;
       }
     }
@@ -1026,6 +1171,193 @@ export function LaunchPage() {
             />
           </div>
         </CollapsibleSection>
+
+        <CollapsibleSection section={PARAMETER_SECTIONS[4]}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <SelectInput
+              label="Host"
+              value={form.host}
+              onChange={(v) => updateField('host', v)}
+              options={[
+                { value: '127.0.0.1', label: '127.0.0.1 (localhost)' },
+                { value: '0.0.0.0', label: '0.0.0.0 (all interfaces)' },
+              ]}
+              hint="Bind address for the server"
+            />
+            <Toggle
+              label="CORS"
+              checked={form.cors}
+              onChange={(v) => updateField('cors', v)}
+              hint="Enable Cross-Origin Resource Sharing"
+            />
+            <NumberInput
+              label="CORS Allow Origin"
+              value={form.cors_allow_origin}
+              onChange={(v) => updateField('cors_allow_origin', String(v))}
+              placeholder="*"
+              hint="Allowed origin (e.g. https://example.com or *)"
+            />
+            <NumberInput
+              label="API Key"
+              value={form.api_key}
+              onChange={(v) => updateField('api_key', String(v))}
+              placeholder=""
+              hint="Optional API key for authentication"
+            />
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection section={PARAMETER_SECTIONS[5]}>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <SelectInput
+              label="Flash Attention"
+              value={form.flash_attn}
+              onChange={(v) => updateField('flash_attn', v)}
+              options={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'on', label: 'On' },
+                { value: 'off', label: 'Off' },
+              ]}
+              hint="Enable flash attention (auto = detect)"
+            />
+            <Toggle
+              label="No MMAP"
+              checked={form.no_mmap}
+              onChange={(v) => updateField('no_mmap', v)}
+              hint="Disable memory mapping for model loading"
+            />
+            <Toggle
+              label="MLOCK"
+              checked={form.mlock}
+              onChange={(v) => updateField('mlock', v)}
+              hint="Lock model in RAM to prevent swapping"
+            />
+            <SelectInput
+              label="NUMA"
+              value={form.numa}
+              onChange={(v) => updateField('numa', v)}
+              options={[
+                { value: '', label: 'Off' },
+                { value: 'distribute', label: 'Distribute' },
+                { value: 'isolate', label: 'Isolate' },
+                { value: 'numactl', label: 'Numactl' },
+              ]}
+              hint="NUMA node binding strategy"
+            />
+            <Toggle
+              label="Continuous Batching"
+              checked={form.cont_batching}
+              onChange={(v) => updateField('cont_batching', v)}
+              hint="Enable continuous batching for higher throughput"
+            />
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection section={PARAMETER_SECTIONS[6]}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <SelectInput
+              label="RoPE Scaling"
+              value={form.rope_scaling}
+              onChange={(v) => updateField('rope_scaling', v)}
+              options={[
+                { value: 'none', label: 'None' },
+                { value: 'linear', label: 'Linear' },
+                { value: 'yarn', label: 'YaRN (Yet another RoPE scaling)' },
+              ]}
+              hint="RoPE frequency scaling method for extended context"
+            />
+            <NumberInput
+              label="RoPE Freq Base"
+              value={form.rope_freq_base}
+              onChange={(v) => updateField('rope_freq_base', Math.round(parseFloat(String(v))) || 1000000)}
+              min={1}
+              max={10000000}
+              hint="RoPE frequency base (NTK-aware scaling)"
+            />
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection section={PARAMETER_SECTIONS[7]}>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Toggle
+              label="Embedding Mode"
+              checked={form.embedding}
+              onChange={(v) => updateField('embedding', v)}
+              hint="Enable embedding mode for vector representations"
+            />
+            <Toggle
+              label="Logits All"
+              checked={form.logits_all}
+              onChange={(v) => updateField('logits_all', v)}
+              hint="Return logits for all tokens, not just the last one"
+            />
+            <Toggle
+              label="Speculative Decoding"
+              checked={form.speculative}
+              onChange={(v) => updateField('speculative', v)}
+              hint="Enable speculative decoding with a draft model"
+            />
+            <NumberInput
+              label="Draft Model"
+              value={form.draft_model}
+              onChange={(v) => updateField('draft_model', String(v))}
+              placeholder=""
+              hint="Path to draft model for speculative decoding"
+            />
+            <NumberInput
+              label="Prompt Cache"
+              value={form.prompt_cache}
+              onChange={(v) => updateField('prompt_cache', String(v))}
+              placeholder=""
+              hint="Path to prompt cache file for persistent context"
+            />
+            <NumberInput
+              label="Keep Live"
+              value={form.keep_live}
+              onChange={(v) => updateField('keep_live', Math.round(parseFloat(String(v))) || 0)}
+              min={0}
+              max={3600}
+              hint="Keep model loaded for N seconds after request (0 = immediate unload)"
+            />
+          </div>
+        </CollapsibleSection>
+
+        {/* Command Preview */}
+        <div className="rounded-lg border border-border bg-muted/30 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Terminal className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-sm font-medium">Command Preview</h3>
+            </div>
+            {previewCommand && (
+              <button
+                type="button"
+                onClick={copyCommand}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Copy command"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          {previewLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Generating...
+            </div>
+          ) : previewCommand ? (
+            <code className="block max-h-32 overflow-auto rounded-md bg-background p-3 text-xs leading-relaxed text-foreground">
+              {previewCommand}
+            </code>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {selectedModelPath ? 'No non-default arguments to display.' : 'Select a model to see the command preview.'}
+            </p>
+          )}
+          {copied && (
+            <p className="mt-2 text-xs text-emerald-500">Command copied to clipboard</p>
+          )}
+        </div>
       </div>
     </div>
   );

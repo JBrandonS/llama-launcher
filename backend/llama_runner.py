@@ -5,6 +5,54 @@ import subprocess
 from typing import Dict, Any, List, Optional
 from backend.config import LlamaConfig
 
+# Default values matching the frontend DEFAULT_FORM
+DEFAULT_ARGS: Dict[str, Any] = {
+    'gpu_layers': -1,
+    'context_size': 0,
+    'threads': 0,
+    'temp': 0.8,
+    'top_k': 40,
+    'top_p': 0.95,
+    'min_p': 0.05,
+    'typical_p': 1.0,
+    'penalty_range': 64,
+    'repeat_penalty': 1.1,
+    'repeat_last_n': 0,
+    'presence_penalty': 0.0,
+    'frequency_penalty': 0.0,
+    'mirostat': 0,
+    'mirostat_tau': 5.0,
+    'mirostat_eta': 0.1,
+    'seed': -1,
+    'n_predict': 256,
+    'num_keep': -1,
+    'rope_freq_scale': 1.0,
+    'grammar_file': '',
+    'batch_size': 2048,
+    'cache_reuse': 0,
+    'host': '127.0.0.1',
+    'cors': False,
+    'flash_attn': False,
+    'no_mmap': False,
+    'mlock': False,
+    'numa': False,
+    'cont_batching': False,
+    'rope_scaling': 'none',
+    'rope_freq_base': 1000000,
+    'embedding': False,
+    'logits_all': False,
+    'speculative': False,
+    'draft_model': '',
+    'prompt_cache': '',
+    'keep_live': 0,
+}
+
+def _values_equal(a: Any, b: Any, tolerance: float = 1e-9) -> bool:
+    """Compare two values, using tolerance for floats."""
+    if isinstance(a, float) and isinstance(b, float):
+        return abs(a - b) < tolerance
+    return a == b
+
 class LlamaRunner:
     """Handles the execution of llama.cpp."""
 
@@ -57,30 +105,95 @@ class LlamaRunner:
         for attr, key in _ATTR_MAP.items():
             options[key] = getattr(self.config, attr)
 
-        # Merge custom options
+        # Merge custom options (from UI form)
         if custom_options:
             options.update(custom_options)
 
-        # Map Python attributes to CLI flags
+        # ── Flag map: key → (cli_flag, value_transform_fn) ──
+        # Boolean flags: transform returns (flag_str, should_include)
+        # Value flags: transform returns (flag_str, str(value))
+        def _bool_flag(flag: str, val: Any) -> tuple[str, bool]:
+            return (f"--{flag}", bool(val))
+
+        def _val_flag(flag: str, val: Any) -> tuple[str, str]:
+            return (f"--{flag}", str(val))
+
+        _FLAG_MAP: Dict[str, Any] = {
+            # Existing fields
+            "n_ctx":       (lambda v: ("--ctx-size", str(v)), None),
+            "n_gpu_layers":(lambda v: ("--n-gpu-layers", str(v)), None),
+            "temp":        (lambda v: ("--temp", str(v)), None),
+            "top_k":       (lambda v: ("--top-k", str(v)), None),
+            "top_p":       (lambda v: ("--top-p", str(v)), None),
+            "n_predict":   (lambda v: ("--n-predict", str(LlamaRunner._clamp_n_predict(v))), None),
+            "threads":     (lambda v: ("--threads", str(v)), None),
+            # Network
+            "host":        (lambda v: ("--host", str(v)), None),
+            "cors":        (_bool_flag("cors", None), None),
+            "cors_allow_origin": (lambda v: ("--cors-allow-origin", str(v)), None),
+            "api_key":     (lambda v: ("--api-key", str(v)), None),
+            # Performance
+            "flash_attn":  (lambda v: ("--flash-attn", str(v)), None),
+            "no_mmap":     (_bool_flag("no-mmap", None), None),
+            "mlock":       (_bool_flag("mlock", None), None),
+            "numa":        (lambda v: ("--numa", str(v)) if v else (None, None), None),
+            "cont_batching": (_bool_flag("cont-batching", None), None),
+            # RoPE
+            "rope_scaling": (lambda v: ("--rope-scaling", str(v)) if v else (None, None), None),
+            "rope_freq_base": (lambda v: ("--rope-freq-base", str(v)), None),
+            # Advanced
+            "embedding":   (_bool_flag("embedding", None), None),
+            "logits_all":  (_bool_flag("logits-all", None), None),
+            "speculative": (_bool_flag("speculative", None), None),
+            "draft_model": (lambda v: ("--draft", str(v)), None),
+            "prompt_cache":(lambda v: ("--prompt-cache", str(v)), None),
+            "keep_live":   (lambda v: ("--keep-live", str(v)), None),
+        }
+
+        # Build CLI args — skip values matching defaults
         cli_args = []
         for key, value in options.items():
-            if key == "n_ctx":
-                cli_args.extend(["--ctx-size", str(value)])
-            elif key == "n_gpu_layers":
-                cli_args.extend(["--n-gpu-layers", str(value)])
-            elif key == "temp":
-                cli_args.extend(["--temp", str(value)])
-            elif key == "top_k":
-                cli_args.extend(["--top-k", str(value)])
-            elif key == "top_p":
-                cli_args.extend(["--top-p", str(value)])
-            elif key == "n_predict":
-                cli_args.extend(["--n-predict", str(LlamaRunner._clamp_n_predict(value))])
-            elif key == "threads":
-                cli_args.extend(["--threads", str(value)])
-        
+            if key not in _FLAG_MAP:
+                continue
+            # Skip if value equals the default
+            default = DEFAULT_ARGS.get(key)
+            if default is not None and _values_equal(value, default):
+                continue
+            transform_fn = _FLAG_MAP[key][0]
+            flag, flag_val = transform_fn(value)
+            if flag is None:
+                continue
+            # Boolean flags: only add if truthy
+            if flag in ("--cors", "--no-mmap", "--mlock", "--cont-batching",
+                        "--embedding", "--logits-all", "--speculative"):
+                if value:
+                    cli_args.append(flag)
+            elif key == "keep_live":
+                # Only add if > 0
+                if int(value) > 0:
+                    cli_args.extend([flag, str(value)])
+            elif key == "rope_freq_base":
+                # Only add if > 0
+                if int(value) > 0:
+                    cli_args.extend([flag, str(value)])
+            else:
+                # Value flags: only add if non-empty/non-zero
+                if flag_val and str(flag_val).strip():
+                    cli_args.extend([flag, str(flag_val)])
+
         command.extend(cli_args)
         return command
+
+    @staticmethod
+    def get_command_preview(model_path: str, options: Dict[str, Any]) -> str:
+        """Generate a CLI command string for preview (without defaults)."""
+        runner = LlamaRunner.__new__(LlamaRunner)
+        runner.config = type('PreviewConfig', (), {attr: DEFAULT_ARGS.get(attr, 0) for attr in DEFAULT_ARGS})()
+        runner.llama_cli = runner._find_llama_executable()
+        # Merge defaults with provided options
+        merged = {**DEFAULT_ARGS, **options}
+        cmd = runner.generate_command(model_path, merged)
+        return ' '.join(cmd)
 
     def run_model(
         self, model_path: str, custom_options: Optional[Dict[str, Any]] = None

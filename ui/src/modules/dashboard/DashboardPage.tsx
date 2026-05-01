@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiService } from '@services/apiService';
 import type { SystemMetrics } from '@services/types';
-import { Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle, Server, Clock, Zap, Microchip } from 'lucide-react';
+import { Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle, Server, Clock, Zap, Microchip, Thermometer, Power } from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -327,6 +327,13 @@ export function DashboardPage() {
     refetchInterval: 30_000,
   });
 
+  const { data: gpuMetrics, isLoading: gpuLoading, error: gpuError } = useQuery({
+    queryKey: ['gpu-metrics'],
+    queryFn: apiService.getGpuMetrics,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+  });
+
   const totalServers = servers?.length ?? 0;
   const runningServers = servers?.filter(s => s.status === 'running').length ?? 0;
   const startingServers = servers?.filter(s => s.status === 'starting').length ?? 0;
@@ -336,12 +343,18 @@ export function DashboardPage() {
   const totalMem = metrics?.system?.memoryPercent ?? 0;
   const totalDisk = metrics?.system?.diskPercent ?? 0;
 
+  // GPU metrics from /metrics/gpu endpoint
   const totalGpuUtil = metrics?.gpu?.utilization ?? 0;
-  const gpuBlock = metrics?.gpu as { memoryTotal?: number; memoryUsed?: number; utilization?: number } | undefined;
-  const hasGpuData = gpuBlock != null && gpuBlock.memoryTotal != null && gpuBlock.memoryTotal > 0;
-  const gpuMemPct = hasGpuData
-    ? ((gpuBlock.memoryUsed ?? 0) / (gpuBlock.memoryTotal ?? 1)) * 100
-    : 0;
+  const gpuAvailable = gpuMetrics?.gpuAvailable ?? false;
+  const gpuBackend = gpuMetrics?.backend ?? '';
+  const gpuAgg = gpuMetrics?.aggregate;
+  const aggGpuUtil = gpuAgg?.utilization ?? 0;
+  const aggGpuMemUsed = gpuAgg?.memoryUsed ?? 0;
+  const aggGpuMemTotal = gpuAgg?.memoryTotal ?? 0;
+  const aggGpuMemPct = aggGpuMemTotal > 0 ? (aggGpuMemUsed / aggGpuMemTotal) * 100 : 0;
+  const gpuName = gpuMetrics?.gpus?.[0]?.name ?? '';
+  const gpuTemp = gpuAgg?.temperature ?? 0;
+  const gpuPower = gpuMetrics?.gpus?.[0]?.powerUsage;
 
   const totalTokens = servers?.reduce(
     (sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0),
@@ -432,33 +445,71 @@ export function DashboardPage() {
           )}
 
           <div className="grid gap-4 lg:grid-cols-4">
+            {/* GPU Utilization Card */}
             <div className="rounded-lg border bg-card p-5 shadow-sm">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">GPU Utilization</p>
                 <Microchip className="h-4 w-4 text-muted-foreground/60" />
               </div>
-              <p className="mt-1 text-3xl font-bold">{totalGpuUtil.toFixed(1)}%</p>
-              <Sparkline
-                data={gpuSparkline}
-                color="#8b5cf6"
-              />
+              {gpuLoading ? (
+                <div className="mt-1 h-8 w-20 bg-muted/50 rounded animate-pulse" />
+              ) : gpuError ? (
+                <p className="mt-1 text-sm text-destructive">Error</p>
+              ) : !gpuAvailable ? (
+                <p className="mt-1 text-sm text-muted-foreground">No GPU</p>
+              ) : (
+                <>
+                  <p className={`mt-1 text-3xl font-bold ${
+                    aggGpuUtil > 90 ? 'text-destructive'
+                      : aggGpuUtil > 75 ? 'text-amber-500'
+                        : aggGpuUtil > 0 ? 'text-violet-500'
+                          : 'text-muted-foreground'
+                  }`}>{aggGpuUtil.toFixed(1)}%</p>
+                  <Sparkline
+                    data={gpuSparkline}
+                    color="#8b5cf6"
+                  />
+                  {gpuName && (
+                    <p className="mt-1 text-xs text-muted-foreground truncate">{gpuName}</p>
+                  )}
+                </>
+              )}
             </div>
+
+            {/* GPU Memory Card */}
             <div className="rounded-lg border bg-card p-5 shadow-sm">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">GPU Memory</p>
                 <Microchip className="h-4 w-4 text-muted-foreground/60" />
               </div>
-              <p className="mt-1 text-3xl font-bold">{gpuMemPct.toFixed(0)}%</p>
-              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted/30">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    gpuMemPct > 90 ? 'bg-destructive'
-                      : gpuMemPct > 75 ? 'bg-amber-500'
-                        : 'bg-violet-500'
-                  }`}
-                  style={{ width: `${Math.min(gpuMemPct, 100)}%` }}
-                />
-              </div>
+              {gpuLoading ? (
+                <div className="mt-1 h-8 w-20 bg-muted/50 rounded animate-pulse" />
+              ) : gpuError ? (
+                <p className="mt-1 text-sm text-destructive">Error</p>
+              ) : !gpuAvailable ? (
+                <p className="mt-1 text-sm text-muted-foreground">No GPU</p>
+              ) : (
+                <>
+                  <p className={`mt-1 text-3xl font-bold ${
+                    aggGpuMemPct > 90 ? 'text-destructive'
+                      : aggGpuMemPct > 75 ? 'text-amber-500'
+                        : 'text-violet-500'
+                  }`}>{aggGpuMemPct.toFixed(0)}%</p>
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted/30">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        aggGpuMemPct > 90 ? 'bg-destructive'
+                          : aggGpuMemPct > 75 ? 'bg-amber-500'
+                            : 'bg-violet-500'
+                      }`}
+                      style={{ width: `${Math.min(aggGpuMemPct, 100)}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {((aggGpuMemUsed / 1_073_741_824)).toFixed(1)} / {((aggGpuMemTotal / 1_073_741_824)).toFixed(1)} GB
+                  </p>
+                </>
+              )}
             </div>
             <div className="rounded-lg border bg-card p-5 shadow-sm">
               <div className="flex items-center justify-between">
@@ -490,7 +541,75 @@ export function DashboardPage() {
               <MetricRow label="CPU" value={`${totalCpu.toFixed(1)}%`} pct={totalCpu} barColor="bg-blue-500" />
               <MetricRow label="Memory" value={`${totalMem.toFixed(1)}%`} pct={totalMem} barColor="bg-emerald-500" />
               <MetricRow label="Disk" value={`${totalDisk.toFixed(1)}%`} pct={totalDisk} barColor="bg-amber-500" />
-             <MetricRow label="GPU Util" value={`${totalGpuUtil.toFixed(1)}%`} pct={totalGpuUtil} barColor="bg-violet-500" />
+              <MetricRow label="GPU Util" value={`${aggGpuUtil.toFixed(1)}%`} pct={gpuAvailable ? aggGpuUtil : totalGpuUtil} barColor="bg-violet-500" />
+            </div>
+
+            {/* GPU Detail Card */}
+            <div className="rounded-lg border bg-card p-5 shadow-sm space-y-4">
+              <h3 className="text-sm font-medium">GPU Details</h3>
+              {gpuLoading ? (
+                <div className="space-y-3">
+                  <div className="h-4 bg-muted/30 rounded animate-pulse" />
+                  <div className="h-4 bg-muted/30 rounded animate-pulse" />
+                </div>
+              ) : gpuError ? (
+                <p className="text-sm text-destructive">Failed to load GPU metrics</p>
+              ) : !gpuAvailable ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">No GPU detected</p>
+                  <p className="text-xs text-muted-foreground">
+                    Install pynvml (NVIDIA), pyamdgpuinfo (AMD), or pylevelzero (Intel) for GPU metrics
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {gpuName && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">GPU</span>
+                      <span className="font-medium truncate ml-2">{gpuName}</span>
+                    </div>
+                  )}
+                  {gpuBackend && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Backend</span>
+                      <span className="font-mono text-xs text-muted-foreground">{gpuBackend}</span>
+                    </div>
+                  )}
+                  {gpuTemp > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground flex items-center gap-1">
+                        <Thermometer className="h-3 w-3" /> Temperature
+                      </span>
+                      <span className={`font-mono ${
+                        gpuTemp > 85 ? 'text-destructive'
+                          : gpuTemp > 70 ? 'text-amber-500'
+                            : 'text-emerald-500'
+                      }`}>{gpuTemp}°C</span>
+                    </div>
+                  )}
+                  {gpuPower !== undefined && gpuPower > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground flex items-center gap-1">
+                        <Power className="h-3 w-3" /> Power Draw
+                      </span>
+                      <span className="font-mono">{gpuPower.toFixed(1)} W</span>
+                    </div>
+                  )}
+                  {gpuMetrics?.gpus && gpuMetrics.gpus.length > 1 && (
+                    <div className="pt-2 border-t">
+                      <p className="text-xs text-muted-foreground mb-1">{gpuMetrics.gpus.length} GPUs detected</p>
+                      <div className="space-y-1">
+                        {gpuMetrics.gpus.map((g) => (
+                          <div key={g.index} className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground truncate mr-2">GPU {g.index}: {g.name}</span>
+                            <span className="font-mono">{g.utilization}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="rounded-lg border bg-card p-5 shadow-sm space-y-4">
               <h3 className="text-sm font-medium">Resource History (60 samples)</h3>
