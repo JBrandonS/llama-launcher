@@ -2,10 +2,14 @@ import type {
   ApiResponse,
   DaemonConfig,
   DaemonInfo,
+  DownloadModelRequest,
+  DownloadModelResponse,
   LaunchConfig,
   LaunchResponse,
   LogStreamResponse,
   ModelInfo,
+  ModelQuantizationsResponse,
+  ModelResolveResponse,
   ServerInfo,
   Settings,
   SystemMetrics,
@@ -86,6 +90,24 @@ export const apiService = {
   async getModels(): Promise<ModelInfo[]> {
     const res = await request('/models');
     return res.ok ? (res.data as ModelInfo[]) : [];
+  },
+
+  async resolveAlias(alias: string): Promise<ModelResolveResponse | null> {
+    const res = await request<ModelResolveResponse>(`/models/resolve?alias=${encodeURIComponent(alias)}`);
+    return res.ok ? (res.data as ModelResolveResponse) : null;
+  },
+
+  async getModelQuantizations(model: string): Promise<ModelQuantizationsResponse | null> {
+    const res = await request<ModelQuantizationsResponse>(`/models/quantizations?model=${encodeURIComponent(model)}`);
+    return res.ok ? (res.data as ModelQuantizationsResponse) : null;
+  },
+
+  async downloadModel(payload: DownloadModelRequest): Promise<DownloadModelResponse | null> {
+    const res = await request<DownloadModelResponse>('/models/download', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return res.ok ? (res.data as DownloadModelResponse) : null;
   },
 
   // ── Metrics ─────────────────────────────────────────────────

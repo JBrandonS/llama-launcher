@@ -33,6 +33,13 @@ export interface TokenUsage {
 }
 
 // ─── Model Types ──────────────────────────────────────────────
+export interface QuantizationInfo {
+  tag: string;
+  size?: string;
+  filename?: string;
+  isRecommended?: boolean;
+}
+
 export interface ModelInfo {
   id: string;
   path: string;
@@ -40,6 +47,30 @@ export interface ModelInfo {
   size_human: string;
   last_modified: string;
   tags: string[];
+  aliases?: string[];
+  quantizations?: QuantizationInfo[];
+}
+
+export interface ModelResolveResponse {
+  alias: string;
+  resolved: string;
+}
+
+export interface ModelQuantizationsResponse {
+  model: string;
+  quantizations: QuantizationInfo[];
+}
+
+export interface DownloadModelRequest {
+  model: string;
+  quantization?: string;
+}
+
+export interface DownloadModelResponse {
+  status: string;
+  message: string;
+  model?: string;
+  quantization?: string;
 }
 
 // ─── Metrics Types ─────────────────────────────────────────────
