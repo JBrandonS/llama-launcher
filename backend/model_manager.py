@@ -4,7 +4,6 @@ import asyncio
 import time
 from typing import List, Dict, Optional, Any
 from huggingface_hub import HfApi
-import click
 import json
 from datetime import datetime
 from backend.config import LlamaConfig
