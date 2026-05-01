@@ -9,6 +9,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import threading
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from backend.config import LlamaConfig, load_config
-from backend.model_manager import ModelManager, scan_local_models
+from backend.model_manager import ModelManager, scan_local_models, download_model
 from backend.process_manager import ProcessManager
 from backend.llama_runner import LlamaRunner
 from backend.logger import get_logger
@@ -78,6 +79,10 @@ class APIHandler(BaseHTTPRequestHandler):
         try:
             if path == "/models":
                 self._handle_get_models()
+            elif path == "/models/resolve":
+                self._handle_get_model_resolve()
+            elif path == "/models/quantizations":
+                self._handle_get_model_quantizations()
             elif path == "/servers" or path.startswith("/servers/"):
                 self._handle_get_servers(path)
             elif path == "/settings":
@@ -105,6 +110,8 @@ class APIHandler(BaseHTTPRequestHandler):
         try:
             if path == "/servers":
                 self._handle_post_server()
+            elif path == "/models/download":
+                self._handle_post_model_download()
             elif path.startswith("/servers/") and path.endswith("/stop"):
                 self._handle_stop_server(path)
             elif path.startswith("/servers/") and path.endswith("/restart"):
@@ -167,6 +174,82 @@ class APIHandler(BaseHTTPRequestHandler):
                 "tags": m.get("tags", []),
             })
         self._send_json(200, result)
+
+    def _handle_get_model_resolve(self):
+        """Resolve an alias to a full HuggingFace model identifier."""
+        qs = self.path.split("?", 1)[1] if "?" in self.path else ""
+        alias = ""
+        for param in qs.split("&"):
+            if param.startswith("alias="):
+                alias = param.split("=", 1)[1]
+
+        if not alias:
+            self._send_json(400, {"error": "alias parameter is required"})
+            return
+
+        _ensure_instantiated()
+        resolved = _model_manager.resolve_alias(alias)
+        if resolved:
+            self._send_json(200, {"alias": alias, "resolved": resolved})
+        else:
+            self._send_json(404, {"error": f"Alias not found: {alias}", "alias": alias})
+
+    def _handle_get_model_quantizations(self):
+        """Get available quantization variants for a HuggingFace model."""
+        qs = self.path.split("?", 1)[1] if "?" in self.path else ""
+        model_id = ""
+        for param in qs.split("&"):
+            if param.startswith("model="):
+                model_id = param.split("=", 1)[1]
+
+        if not model_id:
+            self._send_json(400, {"error": "model parameter is required"})
+            return
+
+        _ensure_instantiated()
+
+        # Resolve alias if needed
+        if _model_manager.is_alias(model_id):
+            resolved = _model_manager.resolve_alias(model_id)
+            if resolved:
+                model_id = resolved
+
+        try:
+            quantizations = asyncio.run(_model_manager.get_quantizations(model_id))
+            self._send_json(200, {"model": model_id, "quantizations": quantizations})
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_post_model_download(self):
+        """Download a model from HuggingFace, optionally selecting a quantization."""
+        body = self._read_body()
+        model_id = body.get("model", body.get("model_id", ""))
+        quantization = body.get("quantization", "")
+        local_dir = body.get("local_dir", str(_config.local_model_search_paths[0]) if _config else "./hf_models")
+
+        if not model_id:
+            self._send_json(400, {"error": "model_id is required"})
+            return
+
+        _ensure_instantiated()
+
+        # Resolve alias if needed
+        if _model_manager.is_alias(model_id):
+            resolved = _model_manager.resolve_alias(model_id)
+            if resolved:
+                model_id = resolved
+
+        try:
+            result = download_model(model_id, local_dir=local_dir, quantization=quantization or None)
+            self._send_json(200, {
+                "status": "downloaded",
+                "model": model_id,
+                "path": result,
+                "quantization": quantization,
+            })
+        except Exception as e:
+            logger.exception("Model download failed")
+            self._send_json(500, {"error": str(e)})
 
     def _handle_get_servers(self, path):
         _ensure_instantiated()
@@ -391,37 +474,27 @@ class APIHandler(BaseHTTPRequestHandler):
             errors.append({"field": "port", "message": "Port must be a number"})
 
         try:
-            gpu_layers = int(body.get("args", {}).get("gpu_layers", 0))
-            if gpu_layers != -1 and (gpu_layers < 0 or gpu_layers > 128):
-                errors.append({"field": "gpu_layers", "message": "Must be -1 or between 0 and 128"})
+            int(body.get("args", {}).get("gpu_layers", 0))
         except (ValueError, TypeError):
             errors.append({"field": "gpu_layers", "message": "GPU layers must be a number"})
 
         try:
-            ctx = int(body.get("args", {}).get("context_size", 0))
-            if ctx < 256 or ctx > 32768:
-                errors.append({"field": "context_size", "message": "Context size must be between 256 and 32768"})
+            int(body.get("args", {}).get("context_size", 0))
         except (ValueError, TypeError):
             errors.append({"field": "context_size", "message": "Context size must be a number"})
 
         try:
-            threads = int(body.get("args", {}).get("threads", 0))
-            if threads < 1 or threads > 64:
-                errors.append({"field": "threads", "message": "Threads must be between 1 and 64"})
+            int(body.get("args", {}).get("threads", 0))
         except (ValueError, TypeError):
             errors.append({"field": "threads", "message": "Threads must be a number"})
 
         try:
-            n_predict = int(body.get("args", {}).get("n_predict", 0))
-            if n_predict != -1 and (n_predict < 1 or n_predict > 4096):
-                errors.append({"field": "n_predict", "message": "Max tokens must be between 1 and 4096 (-1 = unlimited)"})
+            int(body.get("args", {}).get("n_predict", 0))
         except (ValueError, TypeError):
             errors.append({"field": "n_predict", "message": "Max tokens must be a number"})
 
         try:
-            temp = float(body.get("args", {}).get("temperature", 0))
-            if temp < 0 or temp > 2:
-                errors.append({"field": "temperature", "message": "Temperature must be between 0 and 2"})
+            float(body.get("args", {}).get("temperature", 0))
         except (ValueError, TypeError):
             errors.append({"field": "temperature", "message": "Temperature must be a number"})
 

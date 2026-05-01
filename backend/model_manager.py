@@ -43,11 +43,157 @@ class ModelRegistry:
 class ModelManager:
     """Handles detection and retrieval of local and remote models."""
 
+    # Quantization tags ordered by quality (highest first)
+    QUANT_QUALITY_ORDER = [
+        "FP16", "F16", "Q8_0", "Q6_K", "Q5_K_M", "Q5_K_S", "Q5_0",
+        "Q4_K_M", "Q4_K_S", "Q4_0", "Q3_K_M", "Q3_K_S", "Q2_K",
+    ]
+
     def __init__(self, config: LlamaConfig):
         self.config = config
         self.local_model_paths: List[Path] = config.local_model_search_paths
         self._semaphore = asyncio.Semaphore(4)
         self.registry = ModelRegistry()
+        self._aliases: Dict[str, str] = {}
+        self._load_aliases()
+
+    def _load_aliases(self) -> None:
+        """Load alias registry from model_aliases.json."""
+        alias_path = Path(__file__).parent / "model_aliases.json"
+        if alias_path.exists():
+            try:
+                with open(alias_path, "r") as f:
+                    self._aliases = json.load(f)
+                logger.debug(f"Loaded {len(self._aliases)} model aliases")
+            except Exception as e:
+                logger.warning(f"Failed to load model aliases: {e}")
+                self._aliases = {}
+
+    def resolve_alias(self, alias: str) -> Optional[str]:
+        """Resolve a model alias to a full HuggingFace identifier.
+
+        Returns the resolved identifier or None if no alias matches.
+        """
+        if not alias:
+            return None
+        # Direct match
+        if alias in self._aliases:
+            return self._aliases[alias]
+        # Case-insensitive match
+        lower = alias.lower().replace(".", "").replace("-", "")
+        for key, value in self._aliases.items():
+            if key.lower().replace(".", "").replace("-", "") == lower:
+                return value
+        return None
+
+    def is_alias(self, identifier: str) -> bool:
+        """Check if a string is a known alias (not a full HF identifier)."""
+        # Aliases don't contain "/" or ":" (HF identifiers do)
+        return bool(identifier and "/" not in identifier and ":" not in identifier and identifier in self._aliases)
+
+    def is_hf_identifier(self, identifier: str) -> bool:
+        """Check if a string looks like a HuggingFace model identifier."""
+        # HF identifiers have format: repo_id[:quant] or repo_id/filename
+        return bool("/" in identifier)
+
+    async def get_quantizations(self, model_id: str) -> List[Dict[str, Any]]:
+        """Query HuggingFace API for available quantization variants of a model.
+
+        model_id should be a HuggingFace repo identifier (with optional quantization tag).
+        Returns list of QuantizationInfo dicts.
+        """
+        # Strip quantization tag to get base repo_id
+        if ":" in model_id:
+            repo_id = model_id.split(":")[0]
+        else:
+            repo_id = model_id
+
+        # Extract quantization part if present
+        quant_tag = None
+        if ":" in model_id:
+            quant_tag = model_id.split(":", 1)[1]
+
+        try:
+            api = HfApi(token=self.config.hf_api_key)
+            model_info = api.model_info(repo_id)
+
+            quantizations: List[Dict[str, Any]] = []
+            gguf_files = []
+
+            if hasattr(model_info, 'siblings') and model_info.siblings:
+                for file_obj in model_info.siblings:
+                    filename = getattr(file_obj, 'rfilename', '')
+                    if filename.endswith('.gguf'):
+                        gguf_files.append(filename)
+
+            # Parse quantization tags from filenames
+            for filename in gguf_files:
+                quant = self._extract_quant_tag(filename)
+                if quant:
+                    quantizations.append({
+                        "tag": quant,
+                        "filename": filename,
+                    })
+
+            # Remove duplicates by tag, keeping the first occurrence
+            seen_tags = set()
+            unique_quantizations = []
+            for q in quantizations:
+                if q["tag"] not in seen_tags:
+                    seen_tags.add(q["tag"])
+                    unique_quantizations.append(q)
+
+            # Mark recommended quantization (smallest high-quality option)
+            recommended = self._pick_recommended(unique_quantizations)
+            for q in unique_quantizations:
+                q["isRecommended"] = q["tag"] == recommended
+
+            # Sort by quality order
+            unique_quantizations.sort(
+                key=lambda q: self.QUANT_QUALITY_ORDER.index(q["tag"])
+                if q["tag"] in self.QUANT_QUALITY_ORDER
+                else len(self.QUANT_QUALITY_ORDER)
+            )
+
+            return unique_quantizations
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch quantizations for {repo_id}: {e}")
+            return []
+
+    def _extract_quant_tag(self, filename: str) -> Optional[str]:
+        """Extract quantization tag from a GGUF filename.
+
+        Examples:
+            'model.Q4_K_M.gguf' -> 'Q4_K_M'
+            'model-F16.gguf' -> 'F16'
+            'model.Q8_0.gguf' -> 'Q8_0'
+        """
+        stem = filename.replace('.gguf', '')
+        # Match quantization patterns like Q4_K_M, Q8_0, F16, FP16, UD-Q4_K_M, etc.
+        import re
+        # Handle UD- prefixed quantizations
+        match = re.search(r'(UD[-_]?(Q[0-9]_[KS]?[M]?|F[16]))$', stem)
+        if match:
+            return match.group(1).replace('_', '_')
+        # Standard quantization pattern
+        match = re.search(r'(Q[0-9]_[KS]?[M]?|Q[0-9]_0|Q[0-9]_K_[SL]?|F[16]|FP16)$', stem)
+        if match:
+            return match.group(1)
+        return None
+
+    def _pick_recommended(self, quantizations: List[Dict[str, Any]]) -> Optional[str]:
+        """Pick the recommended quantization tag.
+
+        Strategy: smallest quantization that provides good quality.
+        Prefer Q4_K_M or Q5_K_M as they offer good quality/size balance.
+        """
+        preferred = ["Q4_K_M", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0", "FP16", "F16",
+                     "Q4_K_S", "Q4_0", "Q3_K_M", "Q3_K_S", "Q3_K_L", "Q2_K"]
+        for tag in preferred:
+            if any(q["tag"] == tag for q in quantizations):
+                return tag
+        return quantizations[0]["tag"] if quantizations else None
 
     def autodetect_local_models(self) -> List[Dict[str, Any]]:
         """
@@ -340,20 +486,50 @@ def scan_local_models(registry: ModelRegistry, scan_paths: Optional[List[Path]] 
     logger.debug(f"Local model scan complete: {len(discovered_models)} models found.")
     return discovered_models
 
-def download_model(model_id: str, local_dir: str = "./hf_models") -> str:
+def download_model(model_id: str, local_dir: str = "./hf_models", quantization: Optional[str] = None) -> str:
     """
     Downloads a model from Hugging Face to a local directory.
-    
+
     Parameters:
         model_id: The Hugging Face model ID (e.g., 'meta-llama/Llama-2-7b').
         local_dir: The local directory to download to. Defaults to './hf_models'.
-    
+        quantization: Optional quantization tag to filter files (e.g., 'Q4_K_M').
+
     Returns:
         The local path to the downloaded model.
     """
     try:
-        from huggingface_hub import snapshot_download
-        return snapshot_download(model_id, local_dir=local_dir)
+        from huggingface_hub import snapshot_download, hf_hub_download
+
+        # If model_id contains a quantization tag (e.g., "repo:Q4_K_M"), parse it
+        base_repo = model_id
+        target_quant = quantization
+        if ":" in model_id and not target_quant:
+            parts = model_id.split(":", 1)
+            base_repo = parts[0]
+            target_quant = parts[1]
+
+        # If quantization specified, try to find and download specific file
+        if target_quant:
+            try:
+                api = HfApi()
+                files = api.list_repo_files(base_repo)
+                gguf_files = [f for f in files if f.endswith('.gguf') and target_quant in f]
+                if gguf_files:
+                    target_file = gguf_files[0]
+                    Path(local_dir).mkdir(parents=True, exist_ok=True)
+                    return hf_hub_download(
+                        repo_id=base_repo,
+                        filename=target_file,
+                        local_dir=local_dir,
+                    )
+            except Exception:
+                pass
+
+        # Fallback: download entire repo
+        Path(local_dir).mkdir(parents=True, exist_ok=True)
+        return snapshot_download(base_repo, local_dir=local_dir)
+
     except ImportError:
         raise RuntimeError("huggingface_hub not installed. Install with: pip install huggingface_hub")
     except Exception as e:

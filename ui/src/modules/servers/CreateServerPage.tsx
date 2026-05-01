@@ -12,16 +12,17 @@ import {
   Hash,
   Database,
   FileSearch,
-  ChevronDown,
-  ChevronUp,
   ChevronRight,
   Check,
   Layers,
+  ChevronLeft,
+  Trash2,
+  Play,
 } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
 import type { LaunchConfig, Settings as AppSettings } from '@services/types';
-import { CollapsibleSection } from '@components/common/CollapsibleSection';
+
 
 interface Preset {
   id: string;
@@ -80,6 +81,38 @@ const PRESETS: Preset[] = [
     max_tokens: 512,
     temperature: 0.7,
   },
+];
+
+// ─── Validation Error Types ───────────────────────────────────────
+
+interface IdentityErrors {
+  name?: string;
+  port?: string;
+}
+
+interface ModelErrors {
+  path?: string;
+}
+
+interface RuntimeErrors {
+  gpu_layers?: string;
+  context_size?: string;
+  threads?: string;
+  max_tokens?: string;
+  temperature?: string;
+}
+
+interface StepInfo {
+  id: number;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const STEPS: StepInfo[] = [
+  { id: 1, label: 'Identity', icon: Server },
+  { id: 2, label: 'Model', icon: FileSearch },
+  { id: 3, label: 'Runtime', icon: Cpu },
+  { id: 4, label: 'Review', icon: Check },
 ];
 
 // ─── Input Component ──────────────────────────────────────────────
@@ -490,17 +523,11 @@ function RuntimeStep({
     if (isNaN(gl)) {
       newErrors.gpu_layers = 'Must be a number (-1 for all layers)';
       hasError = true;
-    } else if (gl !== -1 && (gl < 0 || gl > 128)) {
-      newErrors.gpu_layers = 'Must be -1 or between 0 and 128';
-      hasError = true;
     }
 
     const cs = parseInt(contextSize, 10);
     if (isNaN(cs)) {
       newErrors.context_size = 'Must be a number';
-      hasError = true;
-    } else if (cs < 256 || cs > 32768) {
-      newErrors.context_size = 'Must be between 256 and 32768';
       hasError = true;
     }
 
@@ -508,26 +535,17 @@ function RuntimeStep({
     if (isNaN(th)) {
       newErrors.threads = 'Must be a number';
       hasError = true;
-    } else if (th < 1 || th > 64) {
-      newErrors.threads = 'Must be between 1 and 64';
-      hasError = true;
     }
 
     const mt = parseInt(maxTokens, 10);
     if (isNaN(mt)) {
       newErrors.max_tokens = 'Must be a number';
       hasError = true;
-    } else if (mt < 1 || mt > 4096) {
-      newErrors.max_tokens = 'Must be between 1 and 4096';
-      hasError = true;
     }
 
     const temp = parseFloat(temperature);
     if (isNaN(temp)) {
       newErrors.temperature = 'Must be a number';
-      hasError = true;
-    } else if (temp < 0 || temp > 2) {
-      newErrors.temperature = 'Must be between 0 and 2';
       hasError = true;
     }
 
@@ -615,14 +633,12 @@ function RuntimeStep({
           />
         </FormField>
 
-        <FormField label="Context Size" icon={Database} error={errors.context_size} hint="256–32768 tokens">
+        <FormField label="Context Size" icon={Database} error={errors.context_size} hint="any value">
           <input
             type="number"
             value={contextSize}
             onChange={(e) => setContextSize(e.target.value)}
             placeholder="4096"
-            min={256}
-            max={32768}
             className={cn(
               'w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none transition-colors',
               errors.context_size
@@ -632,14 +648,12 @@ function RuntimeStep({
           />
         </FormField>
 
-        <FormField label="Threads" icon={Layers} error={errors.threads} hint="1–64 (CPU cores)">
+        <FormField label="Threads" icon={Layers} error={errors.threads} hint="any value">
           <input
             type="number"
             value={threads}
             onChange={(e) => setThreads(e.target.value)}
             placeholder="4"
-            min={1}
-            max={64}
             className={cn(
               'w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none transition-colors',
               errors.threads
@@ -649,14 +663,12 @@ function RuntimeStep({
           />
         </FormField>
 
-        <FormField label="Max Tokens" icon={Server} error={errors.max_tokens} hint="1–4096">
+        <FormField label="Max Tokens" icon={Server} error={errors.max_tokens} hint="any value">
           <input
             type="number"
             value={maxTokens}
             onChange={(e) => setMaxTokens(e.target.value)}
             placeholder="512"
-            min={1}
-            max={4096}
             className={cn(
               'w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none transition-colors',
               errors.max_tokens
@@ -667,7 +679,7 @@ function RuntimeStep({
         </FormField>
 
         <div className="sm:col-span-2">
-          <FormField label="Temperature" icon={Settings} error={errors.temperature} hint="0–2 (creativity)">
+          <FormField label="Temperature" icon={Settings} error={errors.temperature} hint="any value">
           <div className="flex items-center gap-3">
             <input
               type="range"
