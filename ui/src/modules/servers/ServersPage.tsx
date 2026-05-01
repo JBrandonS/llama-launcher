@@ -268,21 +268,21 @@ export function ServersPage() {
   const filtered = servers
     .filter((s) =>
       search
-        ? s.name?.toLowerCase().includes(search.toLowerCase()) ||
-          s.id.includes(search)
+        ? (s.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+          (s.id ?? '').includes(search)
         : true
     )
     .sort((a, b) => {
       let cmp = 0;
       switch (sortField) {
         case 'id':
-          cmp = a.id.localeCompare(b.id);
+          cmp = (a.id ?? '').localeCompare(b.id ?? '');
           break;
         case 'name':
           cmp = (a.name ?? '').localeCompare(b.name ?? '');
           break;
         case 'status':
-          cmp = a.status.localeCompare(b.status);
+          cmp = (a.status ?? '').localeCompare(b.status ?? '');
           break;
         case 'gpu':
           cmp = (a.gpuInfo?.memoryUsed ?? 0) - (b.gpuInfo?.memoryUsed ?? 0);

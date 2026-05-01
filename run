@@ -9,6 +9,15 @@ SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cd "$SCRIPT_DIR"
 
+# ── Auto-build UI if dist/ is missing or sources are newer ──
+if [ ! -d "ui/dist" ] || [ "ui/src" -nt "ui/dist" ]; then
+  echo "Building UI..."
+  (cd ui && npm install --silent 2>/dev/null && npm run build) || {
+    echo "Error: UI build failed" >&2
+    exit 1
+  }
+fi
+
 # ── GPU disable for QtWebEngine (MUST precede Python/Qt load) ──
 # Prevents vkCreateDevice/GBM crashes when Vulkan or hardware
 # acceleration is unavailable (headless, CI, or missing drivers).
