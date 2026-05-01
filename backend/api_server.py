@@ -14,61 +14,30 @@ import json
 import os
 import re
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from backend.config import LlamaConfig, load_config
-from backend.model_manager import ModelManager, scan_local_models, download_model
-from backend.process_manager import ProcessManager
+from backend.context import ServerContext
 from backend.llama_runner import LlamaRunner
 from backend.logger import get_logger
 from backend import daemon as daemon_module, gpu_detector
 
 logger = get_logger(__name__)
 
-_config = None
-_process_manager = None
-_model_manager = None
-_runner = None
-_metrics_history: list[dict[str, Any]] = []
-_metrics_history_lock = threading.Lock()
-_MAX_METRICS_HISTORY = 500
-_gpu_initialized = False
-
-
-def _ensure_instantiated():
-    global _config, _process_manager, _model_manager, _runner
-    if _config is None:
-        _config = load_config()
-    if _process_manager is None:
-        _process_manager = ProcessManager(_config)
-    if _model_manager is None:
-        _model_manager = ModelManager(_config)
-    if _runner is None:
-        _runner = LlamaRunner(_config)
-
-
-def _init_gpu_detection():
-    """Detect active GPU backend and log it (runs once via _gpu_initialized guard)."""
-    global _gpu_initialized
-    if _gpu_initialized:
-        return
-    _gpu_initialized = True
-    try:
-        gpus = gpu_detector.detect_gpu()
-        backend = gpu_detector.get_active_backend()
-        if backend:
-            logger.info("GPU backend active: %s (%d device(s))", backend, len(gpus))
-        else:
-            logger.info("No GPU hardware or drivers detected — running in CPU-only mode")
-    except Exception:
-        logger.debug("GPU detection logging failed", exc_info=True)
-
 
 class APIHandler(BaseHTTPRequestHandler):
+    """HTTP request handler that delegates all business logic to a ServerContext."""
 
-    def _send_json(self, status, data):
+    def __init__(self, context: ServerContext, *args, **kwargs):  # type: ignore[override]
+        self.ctx: ServerContext = context
+        super().__init__(*args, **kwargs)
+
+    # ── HTTP helpers ────────────────────────────────────────────────
+
+    def _send_json(self, status: int, data: Any) -> None:
         body = json.dumps(data, default=str).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -77,23 +46,23 @@ class APIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_body(self):
+    def _read_body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             return {}
         return json.loads(self.rfile.read(length))
 
-    def _cors_headers(self):
+    def _cors_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
-    def do_OPTIONS(self):
+    def do_OPTIONS(self) -> None:
         self.send_response(204)
         self._cors_headers()
         self.end_headers()
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         path = self.path.split("?")[0].rstrip("/") or "/"
         try:
             if path == "/models":
@@ -132,7 +101,7 @@ class APIHandler(BaseHTTPRequestHandler):
             logger.exception("GET %s failed", self.path)
             self._send_json(500, {"error": str(e)})
 
-    def do_POST(self):
+    def do_POST(self) -> None:
         path = self.path.split("?")[0].rstrip("/") or "/"
         try:
             if path == "/servers":
@@ -171,7 +140,7 @@ class APIHandler(BaseHTTPRequestHandler):
             logger.exception("POST %s failed", self.path)
             self._send_json(500, {"error": str(e)})
 
-    def do_DELETE(self):
+    def do_DELETE(self) -> None:
         path = self.path.split("?")[0].rstrip("/") or "/"
         try:
             if path.startswith("/servers/"):
@@ -184,7 +153,7 @@ class APIHandler(BaseHTTPRequestHandler):
             logger.exception("DELETE %s failed", self.path)
             self._send_json(500, {"error": str(e)})
 
-    def do_PUT(self):
+    def do_PUT(self) -> None:
         path = self.path.split("?")[0].rstrip("/") or "/"
         try:
             if path == "/settings":
@@ -199,22 +168,23 @@ class APIHandler(BaseHTTPRequestHandler):
             logger.exception("PUT %s failed", self.path)
             self._send_json(500, {"error": str(e)})
 
-    def _handle_get_models(self):
-        _ensure_instantiated()
-        models = _model_manager.autodetect_local_models()
+    # ── GET handlers ────────────────────────────────────────────────
+
+    def _handle_get_models(self) -> None:
+        models = self.ctx.model_manager.autodetect_local_models()
         result = []
         for m in models:
             result.append({
                 "id": m.get("id", ""),
                 "path": m.get("path", ""),
                 "size_bytes": m.get("size_bytes", 0),
-                "size_human": _human_size(m.get("size_bytes", 0)),
+                "size_human": ServerContext.human_size(m.get("size_bytes", 0)),
                 "last_modified": m.get("last_modified", ""),
                 "tags": m.get("tags", []),
             })
         self._send_json(200, result)
 
-    def _handle_get_model_resolve(self):
+    def _handle_get_model_resolve(self) -> None:
         """Resolve an alias to a full HuggingFace model identifier."""
         qs = self.path.split("?", 1)[1] if "?" in self.path else ""
         alias = ""
@@ -226,14 +196,13 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "alias parameter is required"})
             return
 
-        _ensure_instantiated()
-        resolved = _model_manager.resolve_alias(alias)
+        resolved = self.ctx.model_manager.resolve_alias(alias)
         if resolved:
             self._send_json(200, {"alias": alias, "resolved": resolved})
         else:
             self._send_json(404, {"error": f"Alias not found: {alias}", "alias": alias})
 
-    def _handle_get_model_quantizations(self):
+    def _handle_get_model_quantizations(self) -> None:
         """Get available quantization variants for a HuggingFace model."""
         qs = self.path.split("?", 1)[1] if "?" in self.path else ""
         model_id = ""
@@ -245,36 +214,34 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "model parameter is required"})
             return
 
-        _ensure_instantiated()
-
         # Resolve alias if needed
-        if _model_manager.is_alias(model_id):
-            resolved = _model_manager.resolve_alias(model_id)
+        if self.ctx.model_manager.is_alias(model_id):
+            resolved = self.ctx.model_manager.resolve_alias(model_id)
             if resolved:
                 model_id = resolved
 
         try:
-            quantizations = asyncio.run(_model_manager.get_quantizations(model_id))
+            quantizations = asyncio.run(self.ctx.model_manager.get_quantizations(model_id))
             self._send_json(200, {"model": model_id, "quantizations": quantizations})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
 
-    def _handle_post_model_download(self):
+    def _handle_post_model_download(self) -> None:
         """Download a model from HuggingFace, optionally selecting a quantization."""
+        from backend.model_manager import download_model
+
         body = self._read_body()
         model_id = body.get("model", body.get("model_id", ""))
         quantization = body.get("quantization", "")
-        local_dir = body.get("local_dir", str(_config.local_model_search_paths[0]) if _config else "./hf_models")
+        local_dir = body.get("local_dir", str(self.ctx.config.local_model_search_paths[0]) if self.ctx.config.local_model_search_paths else "./hf_models")
 
         if not model_id:
             self._send_json(400, {"error": "model_id is required"})
             return
 
-        _ensure_instantiated()
-
         # Resolve alias if needed
-        if _model_manager.is_alias(model_id):
-            resolved = _model_manager.resolve_alias(model_id)
+        if self.ctx.model_manager.is_alias(model_id):
+            resolved = self.ctx.model_manager.resolve_alias(model_id)
             if resolved:
                 model_id = resolved
 
@@ -292,7 +259,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
     # ── Model CRUD ──────────────────────────────────────────────
 
-    def _handle_post_model(self):
+    def _handle_post_model(self) -> None:
         """Add/register a new model."""
         body = self._read_body()
         path = body.get("path", body.get("model_path", ""))
@@ -303,29 +270,28 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "path is required"})
             return
 
-        _ensure_instantiated()
         model_path = Path(path)
         if not model_path.exists():
             self._send_json(400, {"error": f"Model path does not exist: {path}"})
             return
 
         model_id = name or model_path.stem
-        _model_manager.registry.add_model(model_id, model_path, {"aliases": aliases})
+        self.ctx.model_manager.registry.add_model(model_id, model_path, {"aliases": aliases})
 
         # Save aliases
-        self._save_aliases()
+        self.ctx.save_aliases()
 
         self._send_json(201, {
             "id": model_id,
             "path": str(model_path),
             "size_bytes": model_path.stat().st_size,
-            "size_human": _human_size(model_path.stat().st_size),
+            "size_human": ServerContext.human_size(model_path.stat().st_size),
             "last_modified": datetime.fromtimestamp(model_path.stat().st_mtime).isoformat(timespec="seconds"),
             "tags": ["gguf", "local"],
             "aliases": aliases,
         })
 
-    def _handle_put_model(self, path):
+    def _handle_put_model(self, path: str) -> None:
         """Update an existing model."""
         # Extract model_id from path: /models/<id>
         parts = path.strip("/").split("/")
@@ -338,24 +304,23 @@ class APIHandler(BaseHTTPRequestHandler):
         name = body.get("name")
         aliases = body.get("aliases")
 
-        _ensure_instantiated()
-        model_info = _model_manager.registry.get(model_id)
+        model_info = self.ctx.model_manager.registry.get(model_id)
         if not model_info:
             self._send_json(404, {"error": f"Model not found: {model_id}"})
             return
 
         # If name changed, update registry
         if name and name != model_id:
-            _model_manager.registry.delete_model(model_id)
-            _model_manager.registry.add_model(name, model_info["path"], model_info.get("metadata"))
+            self.ctx.model_manager.registry.delete_model(model_id)
+            self.ctx.model_manager.registry.add_model(name, model_info["path"], model_info.get("metadata"))
             model_id = name
 
         # Update metadata (aliases)
         metadata = model_info.get("metadata") or {}
         if aliases is not None:
             metadata["aliases"] = aliases
-        _model_manager.registry.update_model(model_id, metadata)
-        self._save_aliases()
+        self.ctx.model_manager.registry.update_model(model_id, metadata)
+        self.ctx.save_aliases()
 
         self._send_json(200, {
             "id": model_id,
@@ -363,7 +328,7 @@ class APIHandler(BaseHTTPRequestHandler):
             "metadata": metadata,
         })
 
-    def _handle_delete_model(self, path):
+    def _handle_delete_model(self, path: str) -> None:
         """Delete a model from the registry."""
         parts = path.strip("/").split("/")
         if len(parts) != 2:
@@ -371,17 +336,15 @@ class APIHandler(BaseHTTPRequestHandler):
             return
         model_id = parts[1]
 
-        _ensure_instantiated()
-        if not _model_manager.registry.delete_model(model_id):
+        if not self.ctx.model_manager.registry.delete_model(model_id):
             self._send_json(404, {"error": f"Model not found: {model_id}"})
             return
 
         self._send_json(200, {"deleted": model_id})
 
-    def _handle_get_model_types(self):
+    def _handle_get_model_types(self) -> None:
         """Get models grouped by type."""
-        _ensure_instantiated()
-        groups = _model_manager.registry.get_model_types()
+        groups = self.ctx.model_manager.registry.get_model_types()
         result = []
         for type_name, models in groups.items():
             if not models:
@@ -402,7 +365,7 @@ class APIHandler(BaseHTTPRequestHandler):
             result.append({"type": type_name, "models": formatted})
         self._send_json(200, result)
 
-    def _handle_get_model_by_id(self, path):
+    def _handle_get_model_by_id(self, path: str) -> None:
         """Get a single model by ID."""
         parts = path.strip("/").split("/")
         if len(parts) != 2:
@@ -410,8 +373,7 @@ class APIHandler(BaseHTTPRequestHandler):
             return
         model_id = parts[1]
 
-        _ensure_instantiated()
-        model_info = _model_manager.registry.get(model_id)
+        model_info = self.ctx.model_manager.registry.get(model_id)
         if not model_info:
             self._send_json(404, {"error": f"Model not found: {model_id}"})
             return
@@ -421,24 +383,14 @@ class APIHandler(BaseHTTPRequestHandler):
             "id": model_id,
             "path": str(model_info["path"]),
             "size_bytes": model_info["path"].stat().st_size,
-            "size_human": _human_size(model_info["path"].stat().st_size),
+            "size_human": ServerContext.human_size(model_info["path"].stat().st_size),
             "last_modified": datetime.fromtimestamp(model_info["path"].stat().st_mtime).isoformat(timespec="seconds"),
             "tags": ["gguf", "local"],
             "aliases": md.get("aliases", []),
         })
 
-    def _save_aliases(self):
-        """Save current aliases to model_aliases.json."""
-        alias_path = Path(__file__).parent / "model_aliases.json"
-        try:
-            with open(alias_path, "w") as f:
-                json.dump(_model_manager._aliases, f, indent=2)
-        except Exception as e:
-            logger.warning(f"Failed to save aliases: {e}")
-
-    def _handle_get_servers(self, path):
-        _ensure_instantiated()
-        servers = _process_manager.list_servers()
+    def _handle_get_servers(self, path: str) -> None:
+        servers = self.ctx.process_manager.list_servers()
         result = []
         for port, record in servers.items():
             try:
@@ -455,22 +407,21 @@ class APIHandler(BaseHTTPRequestHandler):
             })
         self._send_json(200, result)
 
-    def _handle_get_settings(self):
-        _ensure_instantiated()
+    def _handle_get_settings(self) -> None:
         self._send_json(200, {
-            "server_port": _config.server_port,
-            "n_ctx": _config.n_ctx,
-            "n_gpu_layers": _config.n_gpu_layers,
-            "temperature": _config.temperature,
-            "top_k": _config.top_k,
-            "top_p": _config.top_p,
-            "n_predict": _config.n_predict,
-            "threads": _config.threads,
-            "log_level": _config.log_level,
-            "modelCacheDir": str(_config.local_model_search_paths[0]) if _config.local_model_search_paths else "",
+            "server_port": self.ctx.config.server_port,
+            "n_ctx": self.ctx.config.n_ctx,
+            "n_gpu_layers": self.ctx.config.n_gpu_layers,
+            "temperature": self.ctx.config.temperature,
+            "top_k": self.ctx.config.top_k,
+            "top_p": self.ctx.config.top_p,
+            "n_predict": self.ctx.config.n_predict,
+            "threads": self.ctx.config.threads,
+            "log_level": self.ctx.config.log_level,
+            "modelCacheDir": str(self.ctx.config.local_model_search_paths[0]) if self.ctx.config.local_model_search_paths else "",
         })
 
-    def _handle_get_logs(self):
+    def _handle_get_logs(self) -> None:
         log_dir = Path.home() / ".llama_launcher" / "logs"
         limit = 200
         server_filter = None
@@ -586,7 +537,311 @@ class APIHandler(BaseHTTPRequestHandler):
             "serverId": server_id,
         }
 
-    def _handle_post_server(self):
+    def _handle_get_metrics(self) -> None:
+        """Get system metrics (CPU, memory, disk, GPU).
+
+        GPU data priority:
+          1. llama.cpp running servers (via /metrics endpoint)
+          2. Hardware detection via gpu_detector (pynvml / pyamdgpuinfo)
+          3. Empty GPU data with gpuAvailable=false
+        """
+        try:
+            import psutil
+            now = ServerContext.iso_now()
+            vm = psutil.virtual_memory()
+            disk = psutil.disk_usage("/")
+            cpu_pct = psutil.cpu_percent(interval=0.1)
+            load_avg = list(psutil.getloadavg()) if hasattr(psutil, 'getloadavg') else [0, 0, 0]
+
+            gpu_available = False
+            gpu_data: dict[str, Any] = {
+                "utilization": 0,
+                "memoryUsed": 0,
+                "memoryTotal": 0,
+                "temperature": 0,
+            }
+
+            # Priority 1: GPU metrics from llama.cpp running servers
+            try:
+                servers = self.ctx.process_manager.list_servers()
+                total_gpu_mem_used = 0
+                total_gpu_mem_total = 0
+                max_utilization = 0
+                max_temperature = 0
+                for port, srv in servers.items():
+                    if srv.get("status") == "running" and srv.get("port"):
+                        try:
+                            import httpx
+                            resp = httpx.get(
+                                f"http://127.0.0.1:{srv['port']}/metrics", timeout=2
+                            )
+                            if resp.status_code == 200:
+                                srv_metrics = resp.json()
+                                gpu_mem = srv_metrics.get("gpu_mem_used", 0)
+                                gpu_mem_total = srv_metrics.get("gpu_mem_total", 0)
+                                if gpu_mem_total > 0:
+                                    gpu_available = True
+                                    total_gpu_mem_used += gpu_mem
+                                    total_gpu_mem_total += gpu_mem_total
+                                srv_util = srv_metrics.get("gpu_utilization", 0)
+                                if srv_util > max_utilization:
+                                    max_utilization = srv_util
+                                srv_temp = srv_metrics.get("gpu_temperature", 0)
+                                if srv_temp > max_temperature:
+                                    max_temperature = srv_temp
+                        except Exception:
+                            pass
+                if total_gpu_mem_total > 0:
+                    gpu_data["memoryTotal"] = total_gpu_mem_total
+                    gpu_data["memoryUsed"] = total_gpu_mem_used
+                    gpu_data["utilization"] = round(
+                        (total_gpu_mem_used / total_gpu_mem_total) * 100, 1
+                    )
+                if max_utilization > 0:
+                    gpu_data["utilization"] = max(
+                        gpu_data["utilization"], max_utilization
+                    )
+                if max_temperature > 0:
+                    gpu_data["temperature"] = max_temperature
+            except Exception:
+                pass
+
+            # Priority 2: Fallback to hardware detection when no llama.cpp GPU data
+            if not gpu_available:
+                try:
+                    gpus = gpu_detector.detect_gpu()
+                    if gpus:
+                        gpu_available = True
+                        total_used = sum(g.get("memoryUsed", 0) for g in gpus)
+                        total_total = sum(g.get("memoryTotal", 0) for g in gpus)
+                        max_util = max((g.get("utilization", 0) for g in gpus), default=0)
+                        max_temp = max((g.get("temperature", 0) for g in gpus), default=0)
+                        if total_total > 0:
+                            gpu_data["memoryTotal"] = total_total
+                            gpu_data["memoryUsed"] = total_used
+                            gpu_data["utilization"] = round(
+                                (total_used / total_total) * 100, 1
+                            )
+                        gpu_data["utilization"] = max(gpu_data["utilization"], max_util)
+                        gpu_data["temperature"] = max_temp
+                except Exception:
+                    pass
+
+            metrics: dict[str, Any] = {
+                "timestamp": now,
+                "gpuAvailable": gpu_available,
+                "system": {
+                    "cpuPercent": cpu_pct,
+                    "memoryPercent": psutil.virtual_memory().percent,
+                    "memoryUsed": vm.used,
+                    "memoryTotal": vm.total,
+                    "diskPercent": disk.percent,
+                    "diskUsed": disk.used,
+                    "diskTotal": disk.total,
+                    "loadAverage": load_avg[:3],
+                },
+                "gpu": gpu_data,
+            }
+
+            self.ctx.append_metric(metrics)
+
+            self._send_json(200, metrics)
+        except ImportError:
+            now = ServerContext.iso_now()
+            fallback = {
+                "timestamp": now,
+                "gpuAvailable": False,
+                "system": {
+                    "cpuPercent": 0,
+                    "memoryPercent": 0,
+                    "memoryUsed": 0,
+                    "memoryTotal": 1,
+                    "diskPercent": 0,
+                    "diskUsed": 0,
+                    "diskTotal": 1,
+                    "loadAverage": [0, 0, 0],
+                },
+                "gpu": {
+                    "utilization": 0,
+                    "memoryUsed": 0,
+                    "memoryTotal": 0,
+                    "temperature": 0,
+                },
+            }
+            self.ctx.append_metric(fallback)
+            self._send_json(200, fallback)
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_get_metrics_gpu(self) -> None:
+        """Return GPU metrics from hardware detection (no llama.cpp server needed)."""
+        try:
+            gpus = gpu_detector.detect_gpu()
+            if not gpus:
+                self._send_json(200, {
+                    "gpuAvailable": False,
+                    "gpus": [],
+                    "backend": "",
+                })
+                return
+
+            # Aggregate metrics across GPUs
+            total_used = 0
+            total_total = 0
+            max_util = 0
+            max_temp = 0
+            for g in gpus:
+                total_used += g.get("memoryUsed", 0)
+                total_total += g.get("memoryTotal", 0)
+                max_util = max(max_util, g.get("utilization", 0))
+                max_temp = max(max_temp, g.get("temperature", 0))
+
+            self._send_json(200, {
+                "gpuAvailable": True,
+                "backend": gpu_detector.get_active_backend(),
+                "gpus": gpus,
+                "aggregate": {
+                    "memoryUsed": total_used,
+                    "memoryTotal": total_total,
+                    "utilization": round(max_util, 1),
+                    "temperature": max_temp,
+                },
+            })
+        except Exception as e:
+            logger.exception("GPU metrics failed")
+            self._send_json(200, {
+                "gpuAvailable": False,
+                "gpus": [],
+                "backend": "",
+            })
+
+    def _handle_get_health(self) -> None:
+        """Return system health status including GPU availability."""
+        gpu_available = False
+        gpu_backends = []
+
+        # Check if any llama.cpp servers are running (indicates GPU usage)
+        try:
+            servers = self.ctx.process_manager.list_servers()
+            for port, srv in servers.items():
+                if srv.get("status") == "running" and srv.get("port"):
+                    try:
+                        import httpx
+                        resp = httpx.get(
+                            f"http://127.0.0.1:{srv['port']}/metrics", timeout=2
+                        )
+                        if resp.status_code == 200:
+                            gpu_mem = resp.json().get("gpu_mem_total", 0)
+                            if gpu_mem > 0:
+                                gpu_available = True
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Try importing NVIDIA/AMD GPU libraries to detect hardware
+        try:
+            import nvidia_smi  # noqa: F401  # type: ignore[import-not-found]
+            gpu_backends.append("nvidia_smi")
+            gpu_available = True
+            try:
+                nvidia_smi.nvmlInit()
+                dev_count = nvidia_smi.NvmlDeviceGetCount()
+                nvidia_smi.nvmlShutdown()
+                gpu_backends.append(f"{dev_count} device(s)")
+            except Exception:
+                pass
+        except ImportError:
+            pass
+
+        try:
+            import amdgpuinfo  # noqa: F401  # type: ignore[import-not-found]
+            gpu_backends.append("amdgpuinfo")
+            gpu_available = True
+        except ImportError:
+            pass
+
+        self._send_json(200, {
+            "status": "ok",
+            "gpuAvailable": gpu_available,
+            "gpuBackends": gpu_backends,
+            "psutilAvailable": True,
+            "timestamp": ServerContext.iso_now(),
+        })
+
+    def _handle_get_metrics_history(self) -> None:
+        """Get metrics history."""
+        limit = 100
+        if "?" in self.path:
+            qs = self.path.split("?", 1)[1]
+            for param in qs.split("&"):
+                if param.startswith("limit="):
+                    try:
+                        limit = int(param.split("=", 1)[1])
+                    except ValueError:
+                        pass
+        history = self.ctx.get_metrics_history(limit)
+        self._send_json(200, history)
+
+    def _handle_get_daemon_status(self) -> None:
+        """Get real daemon status."""
+        self._send_json(200, daemon_module.daemon_status())
+
+    def _handle_get_daemon_logs(self) -> None:
+        """Get daemon logs."""
+        log_dir = Path.home() / ".llama_launcher" / "logs"
+        limit = 200
+        if "?" in self.path:
+            qs = self.path.split("?", 1)[1]
+            for param in qs.split("&"):
+                if param.startswith("limit="):
+                    try:
+                        limit = int(param.split("=", 1)[1])
+                    except ValueError:
+                        pass
+        entries = []
+        log_file = log_dir / "launcher.log"
+        lines: list[str] = []
+        if log_file.exists():
+            lines = log_file.read_text().splitlines()[-limit:]
+            for line in lines:
+                try:
+                    entry = json.loads(line)
+                    entries.append({
+                        "timestamp": entry.get("timestamp", ""),
+                        "level": entry.get("level", "INFO"),
+                        "component": entry.get("component", ""),
+                        "message": entry.get("message", line),
+                    })
+                except json.JSONDecodeError:
+                    entries.append({
+                        "timestamp": "",
+                        "level": "INFO",
+                        "component": "",
+                        "message": line,
+                    })
+        total_lines = len(lines)
+        self._send_json(200, {"entries": entries, "hasMore": total_lines > limit})
+
+    def _handle_get_daemon_service(self) -> None:
+        """Return the current service file path."""
+        svc_path = daemon_module.get_service_path()
+        if svc_path is None:
+            self._send_json(200, {
+                "servicePath": None,
+                "message": "No service file generated. Start the daemon first.",
+            })
+            return
+        svc_path_obj = Path(svc_path)
+        self._send_json(200, {
+            "servicePath": svc_path,
+            "exists": svc_path_obj.exists(),
+            "content": svc_path_obj.read_text() if svc_path_obj.exists() else "",
+        })
+
+    # ── POST handlers ───────────────────────────────────────────────
+
+    def _handle_post_server(self) -> None:
         body = self._read_body()
         model_path = body.get("model", body.get("model_path", ""))
         port = int(body.get("port", 12345))
@@ -607,13 +862,12 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "model_path is required"})
             return
 
-        _ensure_instantiated()
         # Determine log file path for this server
         log_dir = Path.home() / ".llama_launcher" / "logs"
         log_file = str(log_dir / f"server_{port}.log")
 
         try:
-            result = _process_manager.start_server(
+            result = self.ctx.process_manager.start_server(
                 model_path=model_path,
                 port=port,
                 n_ctx=n_ctx,
@@ -635,7 +889,7 @@ class APIHandler(BaseHTTPRequestHandler):
             logger.exception("Failed to start server on port %d", port)
             self._send_json(500, {"error": str(e)})
 
-    def _handle_post_launch_preview(self):
+    def _handle_post_launch_preview(self) -> None:
         body = self._read_body()
         model_path = body.get("model", body.get("model_path", ""))
         args = body.get("args", {})
@@ -645,25 +899,23 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            from backend.llama_runner import LlamaRunner
             preview = LlamaRunner.get_command_preview(model_path, args)
             self._send_json(200, {"command": preview})
         except Exception as e:
             logger.exception("Failed to generate command preview")
             self._send_json(500, {"error": str(e)})
 
-    def _handle_stop_server(self, path):
+    def _handle_stop_server(self, path: str) -> None:
         parts = path.strip("/").split("/")
         try:
             port = int(parts[-2])
         except (IndexError, ValueError):
             self._send_json(400, {"error": "Invalid server path"})
             return
-        _ensure_instantiated()
-        result = _process_manager.stop_server(port)
+        result = self.ctx.process_manager.stop_server(port)
         self._send_json(200, result)
 
-    def _handle_restart_server(self, path):
+    def _handle_restart_server(self, path: str) -> None:
         body = self._read_body()
         parts = path.strip("/").split("/")
         try:
@@ -671,14 +923,13 @@ class APIHandler(BaseHTTPRequestHandler):
         except (IndexError, ValueError):
             self._send_json(400, {"error": "Invalid server path"})
             return
-        _ensure_instantiated()
-        _process_manager.stop_server(port)
+        self.ctx.process_manager.stop_server(port)
         model_path = body.get("model", body.get("model_path", ""))
         if not model_path:
             self._send_json(400, {"error": "model_path is required for restart"})
             return
         try:
-            result = _process_manager.start_server(
+            result = self.ctx.process_manager.start_server(
                 model_path=model_path,
                 port=port,
                 n_ctx=int(body.get("n_ctx", 2048)),
@@ -698,7 +949,7 @@ class APIHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json(500, {"error": str(e)})
 
-    def _handle_delete_server(self, path):
+    def _handle_delete_server(self, path: str) -> None:
         parts = path.strip("/").split("/")
         try:
             # For DELETE /servers/:id, the port is the last part
@@ -706,11 +957,10 @@ class APIHandler(BaseHTTPRequestHandler):
         except (IndexError, ValueError):
             self._send_json(400, {"error": "Invalid server path"})
             return
-        _ensure_instantiated()
-        _process_manager.stop_server(port)
+        self.ctx.process_manager.stop_server(port)
         self._send_json(200, {"status": "deleted", "port": port})
 
-    def _handle_run(self):
+    def _handle_run(self) -> None:
         body = self._read_body()
         model_path = body.get("model", body.get("model_path", ""))
         prompt = body.get("prompt", "")
@@ -721,9 +971,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "prompt is required"})
             return
 
-        _ensure_instantiated()
         try:
-            result = _runner.run_model_sync(model_path, prompt)
+            result = self.ctx.runner.run_model_sync(model_path, prompt)
             self._send_json(200, {
                 "status": "success",
                 "output": result,
@@ -732,16 +981,45 @@ class APIHandler(BaseHTTPRequestHandler):
             logger.exception("run_model failed")
             self._send_json(500, {"error": str(e)})
 
-    def _handle_put_settings(self):
+    def _handle_post_daemon_start(self) -> None:
+        """Start the daemon: generate service file and record state."""
         body = self._read_body()
-        _ensure_instantiated()
+        result = daemon_module.start_daemon_impl(
+            service_name=body.get("profile", "default"),
+            model_path=str(self.ctx.config.default_model_path) if self.ctx.config and self.ctx.config.default_model_path else None,
+            port=self.ctx.config.server_port if self.ctx.config else 12345,
+            user=os.environ.get("USER", "root"),
+            config=body.get("config"),
+        )
+        self._send_json(200, result)
+
+    def _handle_post_daemon_stop(self) -> None:
+        """Stop the daemon."""
+        result = daemon_module.stop_daemon_impl()
+        self._send_json(200, result)
+
+    # ── PUT handlers ────────────────────────────────────────────────
+
+    def _handle_put_settings(self) -> None:
+        body = self._read_body()
         for key in ("server_port", "n_ctx", "n_gpu_layers", "temperature",
-                     "top_k", "top_p", "n_predict", "threads", "log_level"):
+                      "top_k", "top_p", "n_predict", "threads", "log_level"):
             if key in body:
-                setattr(_config, key, body[key])
+                setattr(self.ctx.config, key, body[key])
         self._send_json(200, {"status": "updated"})
 
-    def _handle_validate(self):
+    def _handle_put_daemon_config(self) -> None:
+        """Update daemon config."""
+        body = self._read_body()
+        daemon_module._daemon_config.update(body)
+        self._send_json(200, {
+            "status": "updated",
+            "config": dict(daemon_module._daemon_config),
+        })
+
+    # ── Validation handlers ────────────────────────────────────────
+
+    def _handle_validate(self) -> None:
         body = self._read_body()
         errors: list[dict[str, str]] = []
 
@@ -874,373 +1152,90 @@ class APIHandler(BaseHTTPRequestHandler):
 
         self._send_json(200, {"valid": len(errors) == 0, "errors": errors})
 
+    def _handle_validate_config(self) -> None:
+        """Validate a config file."""
+        body = self._read_body()
+        config_path = body.get("config_path", "")
+        errors: list[dict[str, str]] = []
 
-    def _handle_get_metrics(self):
-        """Get system metrics (CPU, memory, disk, GPU).
-
-        GPU data priority:
-          1. llama.cpp running servers (via /metrics endpoint)
-          2. Hardware detection via gpu_detector (pynvml / pyamdgpuinfo)
-          3. Empty GPU data with gpuAvailable=false
-        """
-        _ensure_instantiated()
-        try:
-            import psutil
-            now = _iso_now()
-            vm = psutil.virtual_memory()
-            disk = psutil.disk_usage("/")
-            cpu_pct = psutil.cpu_percent(interval=0.1)
-            load_avg = list(psutil.getloadavg()) if hasattr(psutil, 'getloadavg') else [0, 0, 0]
-
-            gpu_available = False
-            gpu_data: dict[str, Any] = {
-                "utilization": 0,
-                "memoryUsed": 0,
-                "memoryTotal": 0,
-                "temperature": 0,
-            }
-
-            # Priority 1: GPU metrics from llama.cpp running servers
-            try:
-                servers = _process_manager.list_servers() if _process_manager else {}
-                total_gpu_mem_used = 0
-                total_gpu_mem_total = 0
-                max_utilization = 0
-                max_temperature = 0
-                for port, srv in servers.items():
-                    if srv.get("status") == "running" and srv.get("port"):
-                        try:
-                            import httpx
-                            resp = httpx.get(
-                                f"http://127.0.0.1:{srv['port']}/metrics", timeout=2
-                            )
-                            if resp.status_code == 200:
-                                srv_metrics = resp.json()
-                                gpu_mem = srv_metrics.get("gpu_mem_used", 0)
-                                gpu_mem_total = srv_metrics.get("gpu_mem_total", 0)
-                                if gpu_mem_total > 0:
-                                    gpu_available = True
-                                    total_gpu_mem_used += gpu_mem
-                                    total_gpu_mem_total += gpu_mem_total
-                                srv_util = srv_metrics.get("gpu_utilization", 0)
-                                if srv_util > max_utilization:
-                                    max_utilization = srv_util
-                                srv_temp = srv_metrics.get("gpu_temperature", 0)
-                                if srv_temp > max_temperature:
-                                    max_temperature = srv_temp
-                        except Exception:
-                            pass
-                if total_gpu_mem_total > 0:
-                    gpu_data["memoryTotal"] = total_gpu_mem_total
-                    gpu_data["memoryUsed"] = total_gpu_mem_used
-                    gpu_data["utilization"] = round(
-                        (total_gpu_mem_used / total_gpu_mem_total) * 100, 1
-                    )
-                if max_utilization > 0:
-                    gpu_data["utilization"] = max(
-                        gpu_data["utilization"], max_utilization
-                    )
-                if max_temperature > 0:
-                    gpu_data["temperature"] = max_temperature
-            except Exception:
-                pass
-
-            # Priority 2: Fallback to hardware detection when no llama.cpp GPU data
-            if not gpu_available:
+        if not config_path:
+            errors.append({"field": "config_path", "message": "Config path is required"})
+        else:
+            path = Path(config_path)
+            if not path.exists():
+                errors.append({"field": "config_path", "message": f"Config file not found: {config_path}"})
+            else:
                 try:
-                    gpus = gpu_detector.detect_gpu()
-                    if gpus:
-                        gpu_available = True
-                        total_used = sum(g.get("memoryUsed", 0) for g in gpus)
-                        total_total = sum(g.get("memoryTotal", 0) for g in gpus)
-                        max_util = max((g.get("utilization", 0) for g in gpus), default=0)
-                        max_temp = max((g.get("temperature", 0) for g in gpus), default=0)
-                        if total_total > 0:
-                            gpu_data["memoryTotal"] = total_total
-                            gpu_data["memoryUsed"] = total_used
-                            gpu_data["utilization"] = round(
-                                (total_used / total_total) * 100, 1
-                            )
-                        gpu_data["utilization"] = max(gpu_data["utilization"], max_util)
-                        gpu_data["temperature"] = max_temp
-                except Exception:
-                    pass
+                    load_config(path)
+                except Exception as e:
+                    errors.append({"field": "config_path", "message": f"Invalid config: {e}"})
 
-            metrics: dict[str, Any] = {
-                "timestamp": now,
-                "gpuAvailable": gpu_available,
-                "system": {
-                    "cpuPercent": cpu_pct,
-                    "memoryPercent": psutil.virtual_memory().percent,
-                    "memoryUsed": vm.used,
-                    "memoryTotal": vm.total,
-                    "diskPercent": disk.percent,
-                    "diskUsed": disk.used,
-                    "diskTotal": disk.total,
-                    "loadAverage": load_avg[:3],
-                },
-                "gpu": gpu_data,
-            }
+        self._send_json(200, {"valid": len(errors) == 0, "errors": errors})
 
-            with _metrics_history_lock:
-                _metrics_history.append(metrics)
-                if len(_metrics_history) > _MAX_METRICS_HISTORY:
-                    _metrics_history.pop(0)
+    def _handle_run_config(self) -> None:
+        """Run a model using config from the request body."""
+        body = self._read_body()
+        model_path = body.get("model", body.get("model_path", ""))
+        prompt = body.get("prompt", "")
+        args = body.get("args", {})
 
-            self._send_json(200, metrics)
-        except ImportError:
-            now = _iso_now()
-            fallback = {
-                "timestamp": now,
-                "gpuAvailable": False,
-                "system": {
-                    "cpuPercent": 0,
-                    "memoryPercent": 0,
-                    "memoryUsed": 0,
-                    "memoryTotal": 1,
-                    "diskPercent": 0,
-                    "diskUsed": 0,
-                    "diskTotal": 1,
-                    "loadAverage": [0, 0, 0],
+        if not model_path:
+            self._send_json(400, {"error": "model is required"})
+            return
+        if not prompt:
+            self._send_json(400, {"error": "prompt is required"})
+            return
+
+        try:
+            result = self.ctx.runner.run_model_sync(
+                model_path,
+                prompt,
+                custom_options={
+                    "temp": float(args.get("temperature", 0.7)),
+                    "top_k": int(args.get("top_k", 40)),
+                    "top_p": float(args.get("top_p", 0.9)),
+                    "n_ctx": int(args.get("context_size", 2048)),
+                    "n_gpu_layers": int(args.get("gpu_layers", -1)),
+                    "threads": int(args.get("threads", 8)),
                 },
-                "gpu": {
-                    "utilization": 0,
-                    "memoryUsed": 0,
-                    "memoryTotal": 0,
-                    "temperature": 0,
-                },
-            }
-            with _metrics_history_lock:
-                _metrics_history.append(fallback)
-                if len(_metrics_history) > _MAX_METRICS_HISTORY:
-                    _metrics_history.pop(0)
-            self._send_json(200, fallback)
+            )
+            self._send_json(200, {
+                "status": "success",
+                "output": result,
+            })
         except Exception as e:
+            logger.exception("run_model failed")
             self._send_json(500, {"error": str(e)})
 
-    def _handle_get_metrics_gpu(self):
-        """Return GPU metrics from hardware detection (no llama.cpp server needed)."""
-        try:
-            gpus = gpu_detector.detect_gpu()
-            if not gpus:
-                self._send_json(200, {
-                    "gpuAvailable": False,
-                    "gpus": [],
-                    "backend": "",
-                })
-                return
 
-            # Aggregate metrics across GPUs
-            total_used = 0
-            total_total = 0
-            max_util = 0
-            max_temp = 0
-            for g in gpus:
-                total_used += g.get("memoryUsed", 0)
-                total_total += g.get("memoryTotal", 0)
-                max_util = max(max_util, g.get("utilization", 0))
-                max_temp = max(max_temp, g.get("temperature", 0))
+# ── Module-level server reference ──────────────────────────────────────
 
-            self._send_json(200, {
-                "gpuAvailable": True,
-                "backend": gpu_detector.get_active_backend(),
-                "gpus": gpus,
-                "aggregate": {
-                    "memoryUsed": total_used,
-                    "memoryTotal": total_total,
-                    "utilization": round(max_util, 1),
-                    "temperature": max_temp,
-                },
-            })
-        except Exception as e:
-            logger.exception("GPU metrics failed")
-            self._send_json(200, {
-                "gpuAvailable": False,
-                "gpus": [],
-                "backend": "",
-            })
-
-    def _handle_get_health(self):
-        """Return system health status including GPU availability."""
-        _ensure_instantiated()
-        gpu_available = False
-        gpu_backends = []
-
-        # Check if any llama.cpp servers are running (indicates GPU usage)
-        try:
-            servers = _process_manager.list_servers()
-            for port, srv in servers.items():
-                if srv.get("status") == "running" and srv.get("port"):
-                    try:
-                        import httpx
-                        resp = httpx.get(
-                            f"http://127.0.0.1:{srv['port']}/metrics", timeout=2
-                        )
-                        if resp.status_code == 200:
-                            gpu_mem = resp.json().get("gpu_mem_total", 0)
-                            if gpu_mem > 0:
-                                gpu_available = True
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        # Try importing NVIDIA/AMD GPU libraries to detect hardware
-        try:
-            import nvidia_smi  # noqa: F401
-            gpu_backends.append("nvidia_smi")
-            gpu_available = True
-            try:
-                nvidia_smi.nvmlInit()
-                dev_count = nvidia_smi.NvmlDeviceGetCount()
-                nvidia_smi.nvmlShutdown()
-                gpu_backends.append(f"{dev_count} device(s)")
-            except Exception:
-                pass
-        except ImportError:
-            pass
-
-        try:
-            import amdgpuinfo  # noqa: F401
-            gpu_backends.append("amdgpuinfo")
-            gpu_available = True
-        except ImportError:
-            pass
-
-        self._send_json(200, {
-            "status": "ok",
-            "gpuAvailable": gpu_available,
-            "gpuBackends": gpu_backends,
-            "psutilAvailable": True,
-            "timestamp": _iso_now(),
-        })
-
-    def _handle_get_metrics_history(self):
-        """Get metrics history."""
-        limit = 100
-        if "?" in self.path:
-            qs = self.path.split("?", 1)[1]
-            for param in qs.split("&"):
-                if param.startswith("limit="):
-                    try:
-                        limit = int(param.split("=", 1)[1])
-                    except ValueError:
-                        pass
-        with _metrics_history_lock:
-            history = list(_metrics_history[-limit:])
-        self._send_json(200, history)
-
-    def _handle_get_daemon_status(self):
-        """Get real daemon status."""
-        self._send_json(200, daemon_module.daemon_status())
-
-    def _handle_get_daemon_logs(self):
-        """Get daemon logs."""
-        log_dir = Path.home() / ".llama_launcher" / "logs"
-        limit = 200
-        if "?" in self.path:
-            qs = self.path.split("?", 1)[1]
-            for param in qs.split("&"):
-                if param.startswith("limit="):
-                    try:
-                        limit = int(param.split("=", 1)[1])
-                    except ValueError:
-                        pass
-        entries = []
-        log_file = log_dir / "launcher.log"
-        if log_file.exists():
-            lines = log_file.read_text().splitlines()[-limit:]
-            for line in lines:
-                try:
-                    entry = json.loads(line)
-                    entries.append({
-                        "timestamp": entry.get("timestamp", ""),
-                        "level": entry.get("level", "INFO"),
-                        "component": entry.get("component", ""),
-                        "message": entry.get("message", line),
-                    })
-                except json.JSONDecodeError:
-                    entries.append({
-                        "timestamp": "",
-                        "level": "INFO",
-                        "component": "",
-                        "message": line,
-                    })
-        total_lines = len(lines) if 'lines' in dir() else 0
-        self._send_json(200, {"entries": entries, "hasMore": total_lines > limit})
-
-    def _handle_get_daemon_service(self):
-        """Return the current service file path."""
-        svc_path = daemon_module.get_service_path()
-        if svc_path is None:
-            self._send_json(200, {
-                "servicePath": None,
-                "message": "No service file generated. Start the daemon first.",
-            })
-            return
-        svc_path_obj = Path(svc_path)
-        self._send_json(200, {
-            "servicePath": svc_path,
-            "exists": svc_path_obj.exists(),
-            "content": svc_path_obj.read_text() if svc_path_obj.exists() else "",
-        })
-
-    def _handle_post_daemon_start(self):
-        """Start the daemon: generate service file and record state."""
-        body = self._read_body()
-        if not _config:
-            _ensure_instantiated()
-        result = daemon_module.start_daemon_impl(
-            service_name=body.get("profile", "default"),
-            model_path=_config.default_model_path if _config else None,
-            port=_config.server_port if _config else 12345,
-            user=os.environ.get("USER", "root"),
-            config=body.get("config"),
-        )
-        self._send_json(200, result)
-
-    def _handle_post_daemon_stop(self):
-        """Stop the daemon."""
-        result = daemon_module.stop_daemon_impl()
-        self._send_json(200, result)
-
-    def _handle_put_daemon_config(self):
-        """Update daemon config."""
-        body = self._read_body()
-        daemon_module._daemon_config.update(body)
-        self._send_json(200, {
-            "status": "updated",
-            "config": dict(daemon_module._daemon_config),
-        })
-
-def _iso_now():
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
+_api_server: HTTPServer | None = None
 
 
-def _human_size(nbytes):
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(nbytes) < 1024.0:
-            return f"{nbytes:.1f} {unit}"
-        nbytes /= 1024.0
-    return f"{nbytes:.1f} PB"
+def api_server(host: str = "127.0.0.1", port: int = 8501) -> HTTPServer:
+    """Create and return an HTTPServer wired to a ServerContext.
 
-
-_api_server = None
-
-
-def api_server(host="127.0.0.1", port=8501):
+    The ServerContext owns all business state (config, process_manager,
+    model_manager, runner, metrics).  APIHandler instances receive it
+    via their constructor so every request shares a single seam.
+    """
     global _api_server
-    _api_server = HTTPServer((host, port), APIHandler)
-    _init_gpu_detection()
+
+    ctx = ServerContext()
+    ctx.init_gpu_detection()
+
+    _api_server = HTTPServer((host, port), lambda *a, **k: APIHandler(ctx, *a, **k))
     return _api_server
 
 
-def get_api_server():
+def get_api_server() -> HTTPServer | None:
+    """Return the running HTTPServer instance (or None)."""
     return _api_server
 
 
-def stop_api_server():
+def stop_api_server() -> None:
+    """Shut down the running HTTPServer."""
     global _api_server
     if _api_server:
         _api_server.shutdown()

@@ -5,12 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "llama-launcher"
 version = "0.1.0"
-description = "Powerful CLI tool for managing and running LLaMA.cpp models"
+description = "GUI tool for managing and running LLaMA.cpp models"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
-    "click>=8.0",
     "pydantic>=2.0",
     "pywebview>=5.0",
     "pyyaml>=6.0",
@@ -24,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-llama-launcher = "backend.cli:cli"
+llama-launcher = "ui.launcher:main"
 llama-launcher-ui = "ui.launcher:main"
 
 [tool.setuptools.packages.find]
