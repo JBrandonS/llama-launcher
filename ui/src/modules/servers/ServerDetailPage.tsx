@@ -1,6 +1,5 @@
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useServerMutation } from '@shared/hooks/useServerMutation';
 import { useParams, Link } from 'react-router-dom';
 import { Badge } from '@components/common/Badge';
 import { apiService } from '@services/apiService';
@@ -17,54 +16,13 @@ import {
   Key,
 } from 'lucide-react';
 import { cn } from '@utils/cn';
-
-function formatUptime(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h < 1) return `${m}m`;
-  return `${h}h ${m}m`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes == null) return '—';
-  const gb = bytes / (1024 * 1024 * 1024);
-  if (gb >= 1) return `${gb.toFixed(1)} GB`;
-  const mb = bytes / (1024 * 1024);
-  return `${mb.toFixed(0)} MB`;
-}
-
-function statusVariant(status: string): 'success' | 'warning' | 'info' | 'neutral' | 'destructive' {
-  switch (status) {
-    case 'running': return 'success';
-    case 'starting': return 'info';
-    case 'stopping': return 'warning';
-    case 'stopped': return 'neutral';
-    case 'error': return 'destructive';
-    default: return 'neutral';
-  }
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'running': return 'Running';
-    case 'starting': return 'Starting';
-    case 'stopping': return 'Stopping';
-    case 'stopped': return 'Stopped';
-    case 'error': return 'Error';
-    default: return status;
-  }
-}
-
-function formatNumber(n: number | undefined | null, decimals = 1): string {
-  return n != null ? n.toFixed(decimals) : '—';
-}
+import { formatBytes, formatNumber, formatUptime } from '@utils/format';
+import { statusVariant, statusLabel, RefreshButton } from '@components/servers/SharedServerComponents';
 
 export function ServerDetailPage() {
   const queryClient = useQueryClient();
   const { serverId } = useParams<{ serverId: string }>();
-  const [isStopping, setIsStopping] = useState(false);
-  const [isRestarting, setIsRestarting] = useState(false);
+  
 
   // Always call hooks first — guard via conditional rendering below
   const { data: server, isLoading, error } = useQuery({
@@ -74,28 +32,18 @@ export function ServerDetailPage() {
     enabled: !!serverId,
   });
 
-  const stopMutation = useMutation({
+  const { trigger: stopServer, isLoading: isStopping } = useServerMutation({
     mutationFn: () => apiService.stopServer(serverId!),
-    onMutate: () => setIsStopping(true),
-    onSuccess: () => {
-      toast.success('Server stopped');
-      queryClient.invalidateQueries({ queryKey: ['server', serverId!] });
-      queryClient.invalidateQueries({ queryKey: ['servers'] });
-    },
-    onError: () => toast.error('Failed to stop server'),
-    onSettled: () => setIsStopping(false),
+    queryKeys: [['server', serverId!], ['servers']],
+    successMessage: 'Server stopped',
+    errorMessage: 'Failed to stop server',
   });
 
-  const restartMutation = useMutation({
+  const { trigger: restartServer, isLoading: isRestarting } = useServerMutation({
     mutationFn: () => apiService.restartServer(serverId!),
-    onMutate: () => setIsRestarting(true),
-    onSuccess: () => {
-      toast.success('Server restarting');
-      queryClient.invalidateQueries({ queryKey: ['server', serverId!] });
-      queryClient.invalidateQueries({ queryKey: ['servers'] });
-    },
-    onError: () => toast.error('Failed to restart server'),
-    onSettled: () => setIsRestarting(false),
+    queryKeys: [['server', serverId!], ['servers']],
+    successMessage: 'Server restarting',
+    errorMessage: 'Failed to restart server',
   });
 
   // Guard: no serverId in URL
@@ -138,13 +86,7 @@ export function ServerDetailPage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => queryClient.invalidateQueries({ queryKey: ['server', serverId] })}
-          className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </button>
+        <RefreshButton onClick={() => queryClient.invalidateQueries({ queryKey: ['server', serverId] })} />
       </div>
 
       {isLoading && (
@@ -179,7 +121,7 @@ export function ServerDetailPage() {
                 <button
                   onClick={() => {
                     if (window.confirm(`Restart ${server.name || serverId}? The server will be temporarily unavailable.`)) {
-                      restartMutation.mutate();
+                      restartServer();
                     }
                   }}
                   disabled={server.status !== 'running' || isRestarting}
@@ -198,7 +140,7 @@ export function ServerDetailPage() {
                 <button
                   onClick={() => {
                     if (window.confirm(`Stop ${server.name || serverId}? This action will terminate the server process.`)) {
-                      stopMutation.mutate();
+                      stopServer();
                     }
                   }}
                   disabled={server.status !== 'running' || isStopping}

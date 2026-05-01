@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useLogSubscription } from '@shared/hooks/useLogSubscription';
 import { toast } from 'sonner';
 import { Badge } from '@components/common/Badge';
 import { apiService } from '@services/apiService';
-import { wsService } from '@services/wsService';
+import { useServerMutation } from '@shared/hooks/useServerMutation';
 import type { LogEntry } from '@services/types';
 import {
   Loader2,
@@ -11,60 +12,21 @@ import {
   Square,
   RefreshCw,
   Settings,
-  AlertTriangle,
   Activity,
   Clock,
   ChevronDown,
   ChevronUp,
   Terminal,
-  Info,
-  AlertOctagon,
+  AlertTriangle,
   CheckCircle,
 } from 'lucide-react';
 import { cn } from '@utils/cn';
-
-function formatUptime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
-type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
-
-const DAEMON_LEVEL_CONFIG: Record<LogLevel, { icon: typeof Info; color: string }> = {
-  DEBUG: { icon: Info, color: 'text-muted-foreground' },
-  INFO: { icon: CheckCircle, color: 'text-blue-500 dark:text-blue-400' },
-  WARNING: { icon: AlertTriangle, color: 'text-amber-500 dark:text-amber-400' },
-  ERROR: { icon: AlertOctagon, color: 'text-red-500 dark:text-red-400' },
-  CRITICAL: { icon: AlertOctagon, color: 'text-red-600 dark:text-red-500' },
-};
-
-function formatTimestamp(ts: string): string {
-  try {
-    const d = new Date(ts);
-    const base = d.toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-    const ms = String(d.getMilliseconds()).padStart(3, '0');
-    return `${base}.${ms}`;
-  } catch {
-    return ts;
-  }
-}
-
-function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+import { formatTimestamp, escapeHtml, formatUptime } from '@utils/format';
+import { LEVEL_CONFIG, LogLevel, filterBySearch } from '@shared/log/LogUtils';
 
 export function DaemonPage() {
   const queryClient = useQueryClient();
-  const [isStarting, setIsStarting] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
+ 
   const [showLogViewer, setShowLogViewer] = useState(false);
   const [daemonFollowMode, setDaemonFollowMode] = useState(false);
   const [daemonVisibleCount, setDaemonVisibleCount] = useState(100);
@@ -78,26 +40,18 @@ export function DaemonPage() {
     refetchInterval: 15000,
   });
 
-  const startMutation = useMutation({
+  const { trigger: startDaemon, isLoading: isStarting } = useServerMutation({
     mutationFn: apiService.startDaemon,
-    onMutate: () => setIsStarting(true),
-    onSuccess: () => {
-      toast.success('Daemon started');
-      queryClient.invalidateQueries({ queryKey: ['daemon'] });
-    },
-    onError: () => toast.error('Failed to start daemon'),
-    onSettled: () => setIsStarting(false),
+    queryKeys: [['daemon']],
+    successMessage: 'Daemon started',
+    errorMessage: 'Failed to start daemon',
   });
 
-  const stopMutation = useMutation({
+  const { trigger: stopDaemon, isLoading: isStopping } = useServerMutation({
     mutationFn: apiService.stopDaemon,
-    onMutate: () => setIsStopping(true),
-    onSuccess: () => {
-      toast.success('Daemon stopped');
-      queryClient.invalidateQueries({ queryKey: ['daemon'] });
-    },
-    onError: () => toast.error('Failed to stop daemon'),
-    onSettled: () => setIsStopping(false),
+    queryKeys: [['daemon']],
+    successMessage: 'Daemon stopped',
+    errorMessage: 'Failed to stop daemon',
   });
 
   const configMutation = useMutation({
@@ -120,15 +74,11 @@ export function DaemonPage() {
     e.component === undefined ? { ...e, component: 'daemon' } : e
   );
 
-  useEffect(() => {
-    if (!daemonFollowMode || !showLogViewer) return;
-
-    const sub = wsService.subscribeToLogs('__daemon__', (entry: LogEntry) => {
-      queryClient.setQueryData(['daemon-logs-incoming'], (old: LogEntry[] = []) => [...old, entry]);
-    });
-
-    return () => sub?.();
-  }, [daemonFollowMode, showLogViewer]);
+  useLogSubscription({
+    serverId: '__daemon__',
+    enabled: daemonFollowMode && showLogViewer,
+    cacheKey: ['daemon-logs-incoming'],
+  });
 
   const allDaemonLogEntries: LogEntry[] = [
     ...daemonLogEntries,
@@ -137,17 +87,9 @@ export function DaemonPage() {
       : []),
   ];
 
-  const filteredDaemonLogs = allDaemonLogEntries.filter((entry) => {
-    if (daemonSearch) {
-      const q = daemonSearch.toLowerCase();
-      return (
-        entry.message.toLowerCase().includes(q) ||
-        entry.component?.toLowerCase().includes(q) ||
-        entry.level.toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
+  const filteredDaemonLogs = allDaemonLogEntries.filter((entry) =>
+    filterBySearch(entry, daemonSearch)
+  );
 
   useEffect(() => {
     if (daemonFollowMode && logContainerRef.current) {
@@ -210,7 +152,7 @@ export function DaemonPage() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => startMutation.mutate()}
+                  onClick={() => startDaemon()}
                   disabled={daemon.status === 'running' || isStarting}
                   className={cn(
                     'inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90',
@@ -227,7 +169,7 @@ export function DaemonPage() {
                 <button
                   onClick={() => {
                     if (window.confirm('Stop the auto-launch daemon? Server launches will no longer be managed automatically.')) {
-                      stopMutation.mutate();
+                      stopDaemon();
                     }
                   }}
                   disabled={daemon.status !== 'running' || isStopping}
@@ -483,7 +425,7 @@ export function DaemonPage() {
                     className="max-h-96 overflow-y-auto rounded-md border bg-muted/30 font-mono text-xs"
                   >
                     {filteredDaemonLogs.map((entry, i) => {
-                      const lc = DAEMON_LEVEL_CONFIG[entry.level as LogLevel];
+                      const lc = LEVEL_CONFIG[entry.level as LogLevel];
                       const Icon = lc.icon;
                       return (
                         <div
