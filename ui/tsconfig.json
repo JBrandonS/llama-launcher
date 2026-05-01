@@ -28,7 +28,8 @@
       "@state/*": ["./src/state/*"],
       "@utils/*": ["./src/utils/*"],
       "@hooks/*": ["./src/hooks/*"],
-      "@styles/*": ["./src/styles/*"]
+      "@styles/*": ["./src/styles/*"],
+      "@shared/*": ["./src/shared/*"]
     }
   },
   "include": ["src", "vite.config.ts", "playwright.config.ts", "vite-env.d.ts", "vitest.setup.ts"]

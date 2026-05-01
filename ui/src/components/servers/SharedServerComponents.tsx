@@ -1,12 +1,33 @@
 import { useState, useEffect } from 'react';
-import { Loader2, Eye } from 'lucide-react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { Loader2, RefreshCw, Eye } from 'lucide-react';
 import { cn } from '@utils/cn';
-import { apiService } from '@services/apiService';
 import { Badge } from '@components/common/Badge';
 import type { ServerInfo } from '@services/types';
 import { formatUptime } from '@utils/format';
+import { useServerStop } from '@shared/hooks/useServerStop';
+
+// ─── Status helpers ───────────────────────────────────────────────
+export function statusVariant(status: string): 'success' | 'warning' | 'info' | 'neutral' | 'destructive' {
+  switch (status) {
+    case 'running': return 'success';
+    case 'starting': return 'info';
+    case 'stopping': return 'warning';
+    case 'stopped': return 'neutral';
+    case 'error': return 'destructive';
+    default: return 'neutral';
+  }
+}
+
+export function statusLabel(status: string): string {
+  switch (status) {
+    case 'running': return 'Running';
+    case 'starting': return 'Starting';
+    case 'stopping': return 'Stopping';
+    case 'stopped': return 'Stopped';
+    case 'error': return 'Error';
+    default: return status;
+  }
+}
 
 export function StatusBadge({ status }: { status: string }) {
   return (
@@ -26,6 +47,95 @@ export function StatusBadge({ status }: { status: string }) {
   );
 }
 
+export function ServerCard({
+  server,
+  onOpen,
+}: {
+  server: ServerInfo;
+  onOpen: (id: string) => void;
+}) {
+  const { isLoading: isStopping, onStop } = useServerStop(server);
+
+  return (
+    <div
+      className="rounded-lg border bg-card p-4 shadow-sm transition-colors hover:bg-accent/50"
+      role="article"
+      aria-label={`Server ${server.name || server.id}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate font-medium">
+              {server.name || server.id}
+            </h3>
+            <StatusBadge status={server.status} />
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            <span className="font-mono">{server.id}</span>
+            {server.port != null && <span className="ml-1">· Port {server.port}</span>}
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            {server.model && (
+              <>
+                <span className="text-muted-foreground">Model:</span>
+                <span className="truncate">{server.model}</span>
+              </>
+            )}
+            {server.gpuInfo?.model && (
+              <>
+                <span className="text-muted-foreground">GPU:</span>
+                <span className="truncate">{server.gpuInfo.model}</span>
+              </>
+            )}
+            {server.gpuInfo?.memoryUsed != null && (
+              <>
+                <span className="text-muted-foreground">VRAM:</span>
+                <span>{server.gpuInfo.memoryUsed} / {server.gpuInfo.memoryTotal} MB</span>
+              </>
+            )}
+            {server.uptimeSeconds != null && (
+              <>
+                <span className="text-muted-foreground">Uptime:</span>
+                <span>{formatUptime(server.uptimeSeconds)}</span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col gap-2">
+          <button
+            onClick={() => onOpen(server.id)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border hover:bg-accent"
+            aria-label={`View ${server.name || server.id} details`}
+            title="View details"
+          >
+            <Eye className="h-4 w-4" />
+          </button>
+          <button
+            onClick={onStop}
+            disabled={server.status !== 'running' || isStopping}
+            className={cn(
+              'inline-flex h-9 w-9 items-center justify-center rounded-md border text-xs transition-colors',
+              server.status === 'running'
+                ? 'border-destructive/30 text-destructive hover:bg-destructive/10'
+                : 'cursor-not-allowed border-border/50 opacity-50'
+            )}
+            aria-label={`Stop ${server.name || server.id}`}
+            aria-disabled={server.status !== 'running' || isStopping}
+            aria-busy={isStopping}
+            title={isStopping ? 'Stopping...' : 'Stop server'}
+          >
+            {isStopping ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <span className="font-medium">Stop</span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ServerRow({
   server,
   onOpen,
@@ -33,19 +143,7 @@ export function ServerRow({
   server: ServerInfo;
   onOpen: (id: string) => void;
 }) {
-  const queryClient = useQueryClient();
-  const [isStopping, setIsStopping] = useState(false);
-
-  const stopMutation = useMutation({
-    mutationFn: () => apiService.stopServer(server.id),
-    onMutate: () => setIsStopping(true),
-    onSuccess: () => {
-      toast.success('Server stopped');
-      queryClient.invalidateQueries({ queryKey: ['servers'] });
-    },
-    onError: () => toast.error('Failed to stop server'),
-    onSettled: () => setIsStopping(false),
-  });
+  const { isLoading: isStopping, onStop } = useServerStop(server);
 
   return (
     <tr className="border-b last:border-b-0 hover:bg-accent/50">
@@ -89,11 +187,7 @@ export function ServerRow({
             <Eye className="h-4 w-4" />
           </button>
           <button
-            onClick={() => {
-              if (window.confirm(`Stop ${server.name || server.id}? This action will terminate the server process.`)) {
-                stopMutation.mutate();
-              }
-            }}
+            onClick={onStop}
             disabled={server.status !== 'running' || isStopping}
             className={cn(
               'inline-flex h-8 items-center rounded-md border px-3 text-sm transition-colors',
@@ -111,6 +205,18 @@ export function ServerRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+export function RefreshButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent"
+    >
+      <RefreshCw className="h-4 w-4" />
+      Refresh
+    </button>
   );
 }
 

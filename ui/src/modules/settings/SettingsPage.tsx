@@ -38,6 +38,12 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: 'advanced', label: 'Advanced', icon: SettingsIcon },
 ];
 
+const THEMES = [
+  { label: 'Light', value: 'light' },
+  { label: 'Dark', value: 'dark' },
+  { label: 'System', value: 'system' },
+];
+
 const DEFAULT_SETTINGS: UISettings = {
   generalLanguage: 'en',
   generalTheme: 'system',
@@ -57,6 +63,17 @@ const DEFAULT_SETTINGS: UISettings = {
   advancedCustomPorts: '',
   advancedNetworkBindings: '127.0.0.1',
 };
+
+// ─── Shared localStorage load helper ──────────────────────────────
+function loadSettings(): UISettings {
+  const stored = localStorage.getItem('launcher:settings');
+  if (stored) {
+    try {
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+    } catch { /* ignore */ }
+  }
+  return DEFAULT_SETTINGS;
+}
 
 // ─── Form field helpers ───────────────────────────────────────────
 function Field({ label, desc, children }: {
@@ -167,11 +184,6 @@ function GeneralTab({ settings, onChange }: { settings: UISettings; onChange: (p
     { label: 'Deutsch', value: 'de' },
     { label: '日本語', value: 'ja' },
   ];
-  const themes = [
-    { label: 'Light', value: 'light' },
-    { label: 'Dark', value: 'dark' },
-    { label: 'System', value: 'system' },
-  ];
 
   return (
     <div className="space-y-6">
@@ -180,7 +192,7 @@ function GeneralTab({ settings, onChange }: { settings: UISettings; onChange: (p
       </Field>
 
       <Field label="Theme" desc="Default theme for the application">
-        <SelectInput value={settings.generalTheme ?? 'system'} onChange={(v) => onChange({ generalTheme: v })} options={themes} />
+        <SelectInput value={settings.generalTheme ?? 'system'} onChange={(v) => onChange({ generalTheme: v })} options={THEMES} />
       </Field>
 
       <Field label="Auto-refresh interval" desc="How often to refresh server data (5-300 seconds)">
@@ -217,16 +229,10 @@ function GeneralTab({ settings, onChange }: { settings: UISettings; onChange: (p
 
 // ─── Appearance tab ───────────────────────────────────────────────
 function AppearanceTab({ settings, onChange }: { settings: UISettings; onChange: (p: Partial<UISettings>) => void }) {
-  const themes = [
-    { label: 'Light', value: 'light' },
-    { label: 'Dark', value: 'dark' },
-    { label: 'System', value: 'system' },
-  ];
-
   return (
     <div className="space-y-6">
       <Field label="Color scheme" desc="Theme applied to the dashboard">
-        <SelectInput value={settings.appearanceTheme ?? 'system'} onChange={(v) => onChange({ appearanceTheme: v })} options={themes} />
+        <SelectInput value={settings.appearanceTheme ?? 'system'} onChange={(v) => onChange({ appearanceTheme: v })} options={THEMES} />
       </Field>
 
       <Row label="Compact mode" desc="Reduce spacing and padding across the UI">
@@ -391,15 +397,7 @@ function AdvancedTab({ settings, onChange }: { settings: UISettings; onChange: (
 // ─── Main component ───────────────────────────────────────────────
 export function SettingsPage() {
   const [tab, setTab] = useState<TabKey>('general');
-  const [local, setLocal] = useState<UISettings>(() => {
-    const stored = localStorage.getItem('launcher:settings');
-    if (stored) {
-      try {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
-      } catch { /* ignore */ }
-    }
-    return DEFAULT_SETTINGS;
-  });
+  const [local, setLocal] = useState<UISettings>(loadSettings);
   const [dirty, setDirty] = useState(false);
   const qc = useQueryClient();
 
@@ -417,14 +415,8 @@ export function SettingsPage() {
     if (apiSettings) {
       setLocal((prev) => {
         // Only update if different from localStorage to avoid flash
-        const stored = localStorage.getItem('launcher:settings');
-        if (stored) {
-          try {
-            const parsed = JSON.parse(stored);
-            return { ...DEFAULT_SETTINGS, ...parsed };
-          } catch { /* ignore */ }
-        }
-        return prev;
+        const stored = loadSettings();
+        return stored !== prev ? stored : prev;
       });
     }
   }, [apiSettings]);
@@ -451,16 +443,13 @@ export function SettingsPage() {
     saveMutation.mutate(local);
   }, [local, saveMutation]);
 
-  const renderTab = () => {
-    switch (tab) {
-      case 'general': return <GeneralTab settings={local} onChange={update} />;
-      case 'appearance': return <AppearanceTab settings={local} onChange={update} />;
-      case 'server': return <ServerTab settings={local} onChange={update} />;
-      case 'api': return <ApiTab settings={local} onChange={update} />;
-      case 'security': return <SecurityTab settings={local} onChange={update} />;
-      case 'advanced': return <AdvancedTab settings={local} onChange={update} />;
-      default: return null;
-    }
+  const tabs: Record<TabKey, React.ComponentType<{ settings: UISettings; onChange: (p: Partial<UISettings>) => void }>> = {
+    general: GeneralTab,
+    appearance: AppearanceTab,
+    server: ServerTab,
+    api: ApiTab,
+    security: SecurityTab,
+    advanced: AdvancedTab,
   };
 
   return (
@@ -518,7 +507,7 @@ export function SettingsPage() {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            renderTab()
+            (() => { const Tab = tabs[tab]; return <Tab settings={local} onChange={update} />; })()
           )}
         </div>
       </div>

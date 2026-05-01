@@ -27,3 +27,15 @@ export function escapeHtml(text: string): string {
   div.textContent = text;
   return div.innerHTML;
 }
+
+export function formatBytes(bytes: number): string {
+  if (bytes == null) return '—';
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(0)} MB`;
+}
+
+export function formatNumber(n: number | undefined | null, decimals = 1): string {
+  return n != null ? n.toFixed(decimals) : '—';
+}

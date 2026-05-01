@@ -1,307 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiService } from '@services/apiService';
-import type { SystemMetrics } from '@services/types';
-import { Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle, Server, Clock, Zap, Microchip, Thermometer, Power } from 'lucide-react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from 'recharts';
-
-function SkeletonCard() {
-  return (
-    <div className="rounded-lg border bg-card p-5 shadow-sm animate-pulse">
-      <div className="h-4 w-20 bg-muted/40 rounded" />
-      <div className="mt-2 h-8 w-24 bg-muted/50 rounded" />
-      <div className="mt-1 h-3 w-28 bg-muted/30 rounded" />
-    </div>
-  );
-}
-
-function StatCard({
-  title,
-  value,
-  sub,
-  icon: Icon,
-  variant = 'default',
-  trend,
-}: {
-  title: string;
-  value: string;
-  sub?: string;
-  icon?: React.ElementType;
-  variant?: 'default' | 'success' | 'warning' | 'error';
-  trend?: 'up' | 'down' | 'flat';
-}) {
-  const borderMap = {
-    default: 'border-border',
-    success: 'border-emerald-500/40',
-    warning: 'border-amber-500/40',
-    error: 'border-destructive/40',
-  };
-  const bgMap = {
-    default: '',
-    success: 'bg-emerald-500/5',
-    warning: 'bg-amber-500/5',
-    error: 'bg-destructive/5',
-  };
-
-  return (
-    <div className={`rounded-lg border bg-card p-5 shadow-sm transition-colors hover:bg-muted/20 ${borderMap[variant]} ${bgMap[variant]}`}>
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{title}</p>
-        {Icon && (
-          <Icon className="h-4 w-4 text-muted-foreground/60" />
-        )}
-      </div>
-      <p className={`mt-1 text-3xl font-bold ${
-        variant === 'error' ? 'text-destructive'
-          : variant === 'warning' ? 'text-amber-500'
-            : variant === 'success' ? 'text-emerald-500'
-              : ''
-      }`}>{value}</p>
-      <div className="mt-1 flex items-center gap-1.5">
-        {trend && (
-          <TrendingUp className={`h-3 w-3 ${
-            trend === 'up' ? 'text-emerald-500' : trend === 'down' ? 'text-amber-500' : 'text-muted-foreground/50'
-          }`} />
-        )}
-        <p className="text-xs text-muted-foreground">{sub}</p>
-      </div>
-    </div>
-  );
-}
-
-function Sparkline({
-  data,
-  width = 120,
-  height = 32,
-  color = '#3b82f6',
-}: {
-  data: number[];
-  width?: number;
-  height?: number;
-  color?: string;
-}) {
-  if (data.length < 2) {
-    return <div className="w-[120px] h-8 bg-muted/20 rounded" />;
-  }
-
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data);
-  const range = max - min || 1;
-  const stepX = width / (data.length - 1);
-
-  const points = data.map((v, i) => {
-    const x = i * stepX;
-    const y = height - ((v - min) / range) * (height - 4) - 2;
-    return `${x},${y}`;
-  }).join(' ');
-
-  const areaPoints = `0,${height} ${points} ${width},${height}`;
-
-  return (
-    <svg width={width} height={height} className="overflow-visible">
-      <defs>
-        <linearGradient id={`grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
-        </linearGradient>
-      </defs>
-      <polygon points={areaPoints} fill={`url(#grad-${color.replace('#', '')})`} />
-      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function MultiResourceChart({
-  cpuData,
-  memData,
-  gpuData,
-}: {
-  cpuData: { timestamp: string; value: number }[];
-  memData: { timestamp: string; value: number }[];
-  gpuData: { timestamp: string; value: number }[];
-}) {
-  const timestampMap = new Map<string, { cpu?: number; mem?: number; gpu?: number }>();
-
-  for (const d of cpuData) {
-    const existing = timestampMap.get(d.timestamp) || {};
-    existing.cpu = d.value;
-    timestampMap.set(d.timestamp, existing);
-  }
-  for (const d of memData) {
-    const existing = timestampMap.get(d.timestamp) || {};
-    existing.mem = d.value;
-    timestampMap.set(d.timestamp, existing);
-  }
-  for (const d of gpuData) {
-    const existing = timestampMap.get(d.timestamp) || {};
-    existing.gpu = d.value;
-    timestampMap.set(d.timestamp, existing);
-  }
-
-  const combined = Array.from(timestampMap.entries())
-    .map(([ts, vals]) => ({ timestamp: ts, ...vals }))
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-  if (combined.length < 2) {
-    return (
-      <div className="h-64 flex items-center justify-center text-sm text-muted-foreground">
-        Insufficient data for chart
-      </div>
-    );
-  }
-
-  return (
-    <ResponsiveContainer width="100%" height={256}>
-      <LineChart data={combined} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--muted-foreground) / 0.15)" />
-        <XAxis
-          dataKey="timestamp"
-          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-          tickFormatter={(val) => {
-            try {
-              const d = new Date(val);
-              return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            } catch {
-              return String(val);
-            }
-          }}
-          interval="preserveStartEnd"
-        />
-        <YAxis
-          domain={[0, 100]}
-          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-          tickFormatter={(v) => `${v}%`}
-          width={40}
-        />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: 'hsl(var(--card))',
-            border: '1px solid hsl(var(--border))',
-            borderRadius: '8px',
-            fontSize: 12,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          }}
-          formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, name]}
-          labelFormatter={(val) => {
-            try {
-              return new Date(val).toLocaleString();
-            } catch {
-              return String(val);
-            }
-          }}
-        />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Line
-          type="monotone"
-          dataKey="cpu"
-          name="CPU"
-          stroke="#3b82f6"
-          strokeWidth={2}
-          dot={false}
-          activeDot={{ r: 5, strokeWidth: 0 }}
-        />
-        <Line
-          type="monotone"
-          dataKey="mem"
-          name="Memory"
-          stroke="#10b981"
-          strokeWidth={2}
-          dot={false}
-          activeDot={{ r: 5, strokeWidth: 0 }}
-        />
-        <Line
-          type="monotone"
-          dataKey="gpu"
-          name="GPU"
-          stroke="#8b5cf6"
-          strokeWidth={2}
-          dot={false}
-          activeDot={{ r: 5, strokeWidth: 0 }}
-        />
-      </LineChart>
-    </ResponsiveContainer>
-  );
-}
-
-function MetricRow({ label, value, pct, barColor = 'bg-blue-500' }: {
-  label: string;
-  value: string;
-  pct: number;
-  barColor?: string;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-medium">{value}</span>
-      </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-muted/30">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${Math.min(pct, 100)}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function HealthStatus({ metrics }: { metrics: SystemMetrics | null }) {
-  if (!metrics) return null;
-
-  const alerts: { type: 'ok' | 'warn' | 'error'; text: string }[] = [];
-
-  if (metrics.system?.cpuPercent !== undefined && metrics.system.cpuPercent > 90) {
-    alerts.push({ type: 'error', text: `High CPU: ${metrics.system.cpuPercent}%` });
-  } else if (metrics.system?.cpuPercent !== undefined && metrics.system.cpuPercent > 75) {
-    alerts.push({ type: 'warn', text: `CPU elevated: ${metrics.system.cpuPercent}%` });
-  }
-
-  if (metrics.system?.memoryPercent !== undefined && metrics.system.memoryPercent > 90) {
-    alerts.push({ type: 'error', text: `High memory: ${metrics.system.memoryPercent}%` });
-  }
-
-  if (metrics.gpu?.memoryUsed !== undefined && metrics.gpu.memoryTotal !== undefined && metrics.gpu.memoryTotal > 0) {
-    const gpuPct = (metrics.gpu.memoryUsed / metrics.gpu.memoryTotal) * 100;
-    if (gpuPct > 90) {
-      alerts.push({ type: 'error', text: `GPU memory critical: ${gpuPct.toFixed(0)}%` });
-    } else if (gpuPct > 75) {
-      alerts.push({ type: 'warn', text: `GPU memory high: ${gpuPct.toFixed(0)}%` });
-    }
-  }
-
-  if (metrics.system?.loadAverage) {
-    const [load1] = metrics.system.loadAverage;
-    if (load1 > 4) {
-      alerts.push({ type: 'warn', text: `High load average: ${load1.toFixed(2)}` });
-    }
-  }
-
-  if (alerts.length === 0) {
-    return <p className="text-sm text-emerald-500">All systems normal</p>;
-  }
-
-  return (
-    <div className="space-y-1.5">
-      {alerts.map((a, i) => (
-        <div key={i} className={`flex items-center gap-1.5 text-sm ${
-          a.type === 'error' ? 'text-destructive' : 'text-amber-500'
-        }`}>
-          <AlertTriangle className="h-3.5 w-3.5" />
-          <span>{a.text}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
+import { Cpu, MemoryStick, HardDrive, TrendingUp, Server, Clock, Zap, Microchip, Thermometer, Power } from 'lucide-react';
+import { SkeletonCard, StatCard, Sparkline, MetricRow, MultiResourceChart, HealthStatus, MetricCard, ProgressPct } from '@components/dashboard/SharedDashboardComponents';
 
 export function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'servers' | 'health'>('overview');
@@ -446,71 +147,31 @@ export function DashboardPage() {
 
           <div className="grid gap-4 lg:grid-cols-4">
             {/* GPU Utilization Card */}
-            <div className="rounded-lg border bg-card p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">GPU Utilization</p>
-                <Microchip className="h-4 w-4 text-muted-foreground/60" />
-              </div>
-              {gpuLoading ? (
-                <div className="mt-1 h-8 w-20 bg-muted/50 rounded animate-pulse" />
-              ) : gpuError ? (
-                <p className="mt-1 text-sm text-destructive">Error</p>
-              ) : !gpuAvailable ? (
-                <p className="mt-1 text-sm text-muted-foreground">No GPU</p>
-              ) : (
-                <>
-                  <p className={`mt-1 text-3xl font-bold ${
-                    aggGpuUtil > 90 ? 'text-destructive'
-                      : aggGpuUtil > 75 ? 'text-amber-500'
-                        : aggGpuUtil > 0 ? 'text-violet-500'
-                          : 'text-muted-foreground'
-                  }`}>{aggGpuUtil.toFixed(1)}%</p>
-                  <Sparkline
-                    data={gpuSparkline}
-                    color="#8b5cf6"
-                  />
-                  {gpuName && (
-                    <p className="mt-1 text-xs text-muted-foreground truncate">{gpuName}</p>
-                  )}
-                </>
+            <MetricCard title="GPU Utilization" icon={Microchip} loading={gpuLoading} error={!!gpuError} noData={!gpuAvailable}>
+              <p className={`mt-1 text-3xl font-bold ${
+                aggGpuUtil > 90 ? 'text-destructive'
+                  : aggGpuUtil > 75 ? 'text-amber-500'
+                    : aggGpuUtil > 0 ? 'text-violet-500'
+                      : 'text-muted-foreground'
+              }`}>{aggGpuUtil.toFixed(1)}%</p>
+              <Sparkline data={gpuSparkline} color="#8b5cf6" />
+              {gpuName && (
+                <p className="mt-1 text-xs text-muted-foreground truncate">{gpuName}</p>
               )}
-            </div>
+            </MetricCard>
 
             {/* GPU Memory Card */}
-            <div className="rounded-lg border bg-card p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">GPU Memory</p>
-                <Microchip className="h-4 w-4 text-muted-foreground/60" />
-              </div>
-              {gpuLoading ? (
-                <div className="mt-1 h-8 w-20 bg-muted/50 rounded animate-pulse" />
-              ) : gpuError ? (
-                <p className="mt-1 text-sm text-destructive">Error</p>
-              ) : !gpuAvailable ? (
-                <p className="mt-1 text-sm text-muted-foreground">No GPU</p>
-              ) : (
-                <>
-                  <p className={`mt-1 text-3xl font-bold ${
-                    aggGpuMemPct > 90 ? 'text-destructive'
-                      : aggGpuMemPct > 75 ? 'text-amber-500'
-                        : 'text-violet-500'
-                  }`}>{aggGpuMemPct.toFixed(0)}%</p>
-                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted/30">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        aggGpuMemPct > 90 ? 'bg-destructive'
-                          : aggGpuMemPct > 75 ? 'bg-amber-500'
-                            : 'bg-violet-500'
-                      }`}
-                      style={{ width: `${Math.min(aggGpuMemPct, 100)}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {((aggGpuMemUsed / 1_073_741_824)).toFixed(1)} / {((aggGpuMemTotal / 1_073_741_824)).toFixed(1)} GB
-                  </p>
-                </>
-              )}
-            </div>
+            <MetricCard title="GPU Memory" icon={Microchip} loading={gpuLoading} error={!!gpuError} noData={!gpuAvailable}>
+              <p className={`mt-1 text-3xl font-bold ${
+                aggGpuMemPct > 90 ? 'text-destructive'
+                  : aggGpuMemPct > 75 ? 'text-amber-500'
+                    : 'text-violet-500'
+              }`}>{aggGpuMemPct.toFixed(0)}%</p>
+              <ProgressPct pct={aggGpuMemPct} color={aggGpuMemPct > 90 ? 'bg-destructive' : aggGpuMemPct > 75 ? 'bg-amber-500' : 'bg-violet-500'} />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {((aggGpuMemUsed / 1_073_741_824)).toFixed(1)} / {((aggGpuMemTotal / 1_073_741_824)).toFixed(1)} GB
+              </p>
+            </MetricCard>
             <div className="rounded-lg border bg-card p-5 shadow-sm">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">Disk Usage</p>
@@ -620,7 +281,7 @@ export function DashboardPage() {
               />
             </div>
           </div>
-       </>
+        </>
       )}
 
       {activeTab === 'servers' && (
