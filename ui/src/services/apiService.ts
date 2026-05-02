@@ -198,6 +198,11 @@ export const apiService = {
     return res.ok;
   },
 
+  async getDaemonServiceFile(): Promise<{ content: string } | null> {
+    const res = await request<{ content: string }>('/daemon/service-file');
+    return res.ok ? (res.data as { content: string }) : null;
+  },
+
   // ── Daemon Logs ─────────────────────────────────────────────
   async getDaemonLogs(limit = 200): Promise<LogStreamResponse> {
     const res = await request<LogStreamResponse>(`/daemon/logs?limit=${limit}`);

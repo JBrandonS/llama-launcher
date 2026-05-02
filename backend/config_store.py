@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 
-CONFIGS_DIR = Path.home() / '.llama_launcher' / 'configs'
+CONFIGS_DIR = Path.home() / '.cache' / 'llama-launcher' / 'configs'
 
 
 class ConfigItem:

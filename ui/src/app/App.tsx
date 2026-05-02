@@ -4,7 +4,6 @@ import { Loader2 } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { ErrorBoundary } from '@components/common/ErrorBoundary';
 import { Sidebar } from '@components/common/Sidebar';
-import { TopBar } from '@components/common/TopBar';
 import { NotFoundPage } from '@components/common/NotFoundPage';
 
 const DashboardPage = lazy(() => import('@modules/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
@@ -15,7 +14,6 @@ const DaemonPage = lazy(() => import('@modules/daemon/DaemonPage').then(m => ({ 
 const LogsPage = lazy(() => import('@modules/logs/LogsPage').then(m => ({ default: m.LogsPage })));
 const SettingsPage = lazy(() => import('@modules/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const LaunchPage = lazy(() => import('@modules/launch/LaunchPage').then(m => ({ default: m.LaunchPage })));
-const QuickLauncherPage = lazy(() => import('@modules/launch/QuickLauncherPage').then(m => ({ default: m.QuickLauncherPage })));
 const ModelsPage = lazy(() => import('@modules/models/ModelsPage').then(m => ({ default: m.ModelsPage })));
 
 const loading = (
@@ -46,8 +44,7 @@ export default function App() {
         'flex flex-1 flex-col overflow-hidden transition-all duration-200',
         sidebarCollapsed ? 'ml-16' : 'ml-56'
       )}>
-        <TopBar />
-        <main className={cn('flex-1 overflow-y-auto p-4 md:p-6')}>
+         <main className={cn('mx-auto flex max-w-6xl flex-1 overflow-y-auto p-4 md:p-6')}>
           <Suspense fallback={loading}>
             <Routes>
               <Route index element={
@@ -71,10 +68,7 @@ export default function App() {
               <Route path="/launch" element={
                 <ErrorBoundary><LaunchPage /></ErrorBoundary>
               } />
-              <Route path="/launch/quick" element={
-                <ErrorBoundary><QuickLauncherPage /></ErrorBoundary>
-              } />
-              <Route path="/models" element={
+               <Route path="/models" element={
                 <ErrorBoundary><ModelsPage /></ErrorBoundary>
               } />
               <Route path="/settings" element={

@@ -10,8 +10,7 @@ import {
   Cpu,
   Rocket,
   Database,
-  Zap,
-  Menu,
+   Menu,
   X,
   ChevronLeft,
   ChevronRight,
@@ -19,7 +18,7 @@ import {
 
 const navItems = [
   { to: '/launch', label: 'Launch', icon: Rocket },
-  { to: '/launch/quick', label: 'Quick Launch', icon: Zap },
+ 
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/servers', label: 'Servers', icon: Server },
   { to: '/models', label: 'Models', icon: Database },
@@ -78,7 +77,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             <Cpu className="h-5 w-5" />
           )}
           <button
-            onClick={collapsed ? onToggle : undefined}
+            onClick={onToggle}
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-accent',
               collapsed ? 'visible' : 'invisible md:visible'
@@ -122,7 +121,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </nav>
         {showLabels && (
           <div className="border-t p-3 text-xs text-muted-foreground">
-            v0.1.0
+            v0.1.1
           </div>
         )}
       </aside>
