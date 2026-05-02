@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, FolderOpen, Download, Sparkles, Globe, Terminal, Copy, Loader2 } from 'lucide-react';
+import { Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, FolderOpen, Download, Globe, Terminal, Copy, Loader2 } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
-import type { ServerInfo, Settings as SettingsType, ValidationError, ModelInfo, QuantizationInfo } from '@services/types';
+import type { ServerInfo, Settings as SettingsType, ValidationError, QuantizationInfo } from '@services/types';
 import { PresetsManager } from '@components/launch/PresetsManager';
 import type { Preset } from '@components/launch/PresetsManager';
 import { TemplateSelector } from '@components/launch/TemplateSelector';
@@ -223,16 +223,6 @@ const PARAMETER_SECTIONS: SectionDef[] = [
   },
 ];
 
-// ─── Known aliases for suggestions ───────────────────────────────
-const KNOWN_ALIASES: Record<string, string> = {
-  'qwen3.6-35b': 'Qwen/Qwen3.6-35B-A4-Band-GGUF',
-  'qwen3.6': 'Qwen/Qwen3.6-35B-A4-Band-GGUF',
-  'llama3.2-1b': 'huggingface/llama3.2-1b-GGUF',
-  'tinyllama': 'TinyLlama/TinyLlama-1.1B-Chat-v1.0-GGUF',
-  'embeddinggemma': 'google/gemma-3-1b-it-GGUF',
-  'qwen3-reranker': 'Qwen/Qwen3-Reranker-8B-A4.2B-GGUF',
-};
-
 // ─── Main Component ───────────────────────────────────────────────
 
 export function LaunchPage() {
@@ -246,7 +236,6 @@ export function LaunchPage() {
   const [selectedPreset, setSelectedPreset] = useState('balanced');
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
-  const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -280,10 +269,11 @@ export function LaunchPage() {
     }
   }, [selectedModelPath, form]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const timer = setTimeout(getPreview, 300);
     return () => clearTimeout(timer);
-  }, [getPreview]);
+  }, [selectedModelPath, JSON.stringify(form)]);
 
   const copyCommand = useCallback(() => {
     if (!previewCommand) return;
@@ -313,9 +303,8 @@ export function LaunchPage() {
     retry: 2,
   });
 
-  useEffect(() => {
-    setModels(fetchedModels);
-  }, [fetchedModels]);
+  // Use fetchedModels directly — no local state sync needed
+  const models = fetchedModels;
 
   // ── Resolve alias + fetch quantizations when HF model input changes ─
   useEffect(() => {
@@ -650,22 +639,14 @@ export function LaunchPage() {
   const displayPort = port ?? (settings?.apiPort ?? 8501);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center gap-4">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
+    <div className="flex justify-center px-2 py-4 sm:px-4">
+      <div className="w-full max-w-4xl space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Launch Server</h1>
           <p className="text-sm text-muted-foreground">
             Configure and launch an inference server
           </p>
         </div>
-      </div>
 
 {(errors.length > 0 || validationErrors.length > 0) && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4">
@@ -768,34 +749,22 @@ export function LaunchPage() {
             </div>
           </div>
 
-          {/* ── HuggingFace model download section ── */}
-          <div className="mt-4 pt-4 border-t">
-            <label className="block text-sm font-medium mb-1 flex items-center gap-2">
-              <Sparkles className="h-3.5 w-3.5 text-violet-400" />
-              Or add from HuggingFace
-            </label>
+          {/* ── Direct model name input ── */}
+          <div className="mt-3">
+            <label className="block text-sm font-medium mb-1">Or type a model name or path</label>
             <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  ref={hfInputRef}
-                  type="text"
-                  value={hfModelInput}
-                  onChange={(e) => {
-                    setHfModelInput(e.target.value);
-                    setDownloadProgress('');
-                  }}
-                  placeholder="e.g. qwen3.6-35b or meta-llama/Llama-3.2-1B"
-                  className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none transition-colors
-                    focus:border-ring focus:ring-2 focus:ring-ring/20 placeholder:text-muted-foreground"
-                />
-                {isResolving && (
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                    <svg className="h-4 w-4 animate-spin text-muted-foreground" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-                    </svg>
-                  </div>
-                )}
-              </div>
+              <input
+                ref={hfInputRef}
+                type="text"
+                value={hfModelInput}
+                onChange={(e) => {
+                  setHfModelInput(e.target.value);
+                  setDownloadProgress('');
+                }}
+                placeholder="e.g. /path/to/model.gguf or meta-llama/Llama-3.2-1B"
+                className="flex-1 rounded-md border bg-transparent px-3 py-2 text-sm outline-none transition-colors
+                  focus:border-ring focus:ring-2 focus:ring-ring/20 placeholder:text-muted-foreground"
+              />
               {resolvedModel && quantizations.length > 0 && (
                 <button
                   type="button"
@@ -809,9 +778,7 @@ export function LaunchPage() {
                 >
                   {isDownloading ? (
                     <>
-                      <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-                      </svg>
+                      <Loader2 className="h-4 w-4 animate-spin" />
                       <span className="hidden sm:inline">{downloadProgress || 'Downloading...'}</span>
                     </>
                   ) : (
@@ -823,64 +790,10 @@ export function LaunchPage() {
                 </button>
               )}
             </div>
-
-            {/* ── Resolved model info ── */}
-            {resolvedModel && !isResolving && (
-              <div className="mt-2 space-y-2">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">Resolved:</span>
-                  <code className="rounded bg-muted px-1.5 py-0.5">{resolvedModel}</code>
-                </div>
-
-                {/* ── Quantization selector ── */}
-                {quantizations.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Quantization:</span>
-                    <div className="flex flex-wrap gap-1">
-                      {quantizations.map((q: QuantizationInfo) => (
-                        <button
-                          key={q.tag}
-                          type="button"
-                          onClick={() => setSelectedQuantization(q.tag)}
-                          className={cn(
-                            'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors',
-                            selectedQuantization === q.tag
-                              ? 'border-primary bg-primary/10 text-primary font-medium'
-                              : 'border-border bg-transparent hover:bg-accent'
-                          )}
-                        >
-                          {q.tag}
-                          {q.isRecommended && (
-                            <span className="text-[10px] text-muted-foreground">recommended</span>
-                          )}
-                          {q.size && (
-                            <span className="text-[10px] text-muted-foreground">{q.size}</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── Alias suggestion ── */}
-            {!resolvedModel && !isResolving && hfModelInput.trim() && (
-              <div className="mt-2 text-xs text-muted-foreground">
-                No alias found for &ldquo;{hfModelInput}&rdquo;. Try:{' '}
-                {Object.entries(KNOWN_ALIASES).slice(0, 3).map(([k], i, arr) => (
-                  <span key={k}>
-                    <button
-                      type="button"
-                      onClick={() => setHfModelInput(k)}
-                      className="text-violet-400 hover:underline"
-                    >
-                      {k}
-                    </button>
-                    {i < arr.length - 1 && ', '}
-                  </span>
-                ))}
-              </div>
+            {hfModelInput.trim() && !resolvedModel && !isResolving && (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Type a local path (.gguf) or HuggingFace identifier (e.g. meta-llama/Llama-3.2-1B)
+              </p>
             )}
           </div>
         </div>
@@ -1360,5 +1273,6 @@ export function LaunchPage() {
         </div>
       </div>
     </div>
+  </div>
   );
 }
