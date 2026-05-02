@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llama-launcher"
-version = "0.1.0"
+version = "0.1.1"
 description = "GUI tool for managing and running LLaMA.cpp models"
 readme = "README.md"
 license = {text = "MIT"}
@@ -14,6 +14,7 @@ dependencies = [
     "pywebview>=5.0",
     "pyyaml>=6.0",
     "huggingface-hub>=0.20",
+    "pynvml>=11.5.0",
 ]
 
 [project.optional-dependencies]

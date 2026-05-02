@@ -14,7 +14,7 @@ except ImportError:
     psutil = None
 
 
-PID_DIR = Path.home() / '.llama_launcher' / 'pids'
+PID_DIR = Path.home() / '.cache' / 'llama-launcher' / 'pids'
 
 
 class ProcessManager:

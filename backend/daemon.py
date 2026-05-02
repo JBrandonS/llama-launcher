@@ -69,7 +69,7 @@ def reload_daemon() -> None:
     if _global_daemon:
         _global_daemon.reload()
 
-SERVICE_DIR = Path.home() / '.llama_launcher' / 'services'
+SERVICE_DIR = Path.home() / '.cache' / 'llama-launcher' / 'services'
 
 # Global state for daemon management
 _daemon_config = {

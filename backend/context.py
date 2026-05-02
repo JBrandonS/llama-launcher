@@ -178,19 +178,6 @@ class ServerContext:
         except Exception:
             LOGGER.debug("GPU detection logging failed", exc_info=True)
 
-    # ── Aliases ─────────────────────────────────────────────────────
-
-    def save_aliases(self) -> None:
-        """Save current model aliases to model_aliases.json."""
-        alias_path = Path(__file__).parent / "model_aliases.json"
-        try:
-            mm = self._model_manager
-            if mm is not None:
-                with open(alias_path, "w") as f:
-                    json.dump(mm._aliases, f, indent=2)
-        except Exception as e:
-            LOGGER.warning("Failed to save aliases: %s", e)
-
     # ── Utility helpers ─────────────────────────────────────────────
 
     @staticmethod
@@ -269,9 +256,7 @@ class FakeServerContext:
     def init_gpu_detection(self) -> None:
         self.gpu_initialized = True
 
-    def save_aliases(self) -> None:
-        pass
-
+  
     @staticmethod
     def iso_now() -> str:
         return datetime.now(timezone.utc).isoformat()

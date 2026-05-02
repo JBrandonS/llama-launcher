@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, FolderOpen, Download, Globe, Terminal, Copy, Loader2 } from 'lucide-react';
+import { Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, ChevronUp, FolderOpen, Download, Globe, Terminal, Copy, Loader2 } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
 import type { ServerInfo, Settings as SettingsType, ValidationError, QuantizationInfo } from '@services/types';
@@ -252,6 +252,7 @@ export function LaunchPage() {
   const [previewCommand, setPreviewCommand] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showIniPreview, setShowIniPreview] = useState(false);
 
   const getPreview = useCallback(async () => {
     if (!selectedModelPath) {
@@ -319,30 +320,16 @@ export function LaunchPage() {
     const timer = setTimeout(async () => {
       setIsResolving(true);
       try {
-        // Try resolving as alias first
-        const resolved = await apiService.resolveAlias(input);
-        if (resolved) {
-          setResolvedModel(resolved.resolved);
-          // Fetch quantizations for the resolved model
-          const quantData = await apiService.getModelQuantizations(resolved.resolved);
-          if (quantData?.quantizations) {
-            setQuantizations(quantData.quantizations);
-            // Auto-select recommended
-            const recommended = quantData.quantizations.find((q: QuantizationInfo) => q.isRecommended);
-            if (recommended) {
-              setSelectedQuantization(recommended.tag);
-            }
-          }
-        } else {
-          // Not an alias — treat as HF identifier directly
-          setResolvedModel(input);
-          const quantData = await apiService.getModelQuantizations(input);
-          if (quantData?.quantizations) {
-            setQuantizations(quantData.quantizations);
-            const recommended = quantData.quantizations.find((q: QuantizationInfo) => q.isRecommended);
-            if (recommended) {
-              setSelectedQuantization(recommended.tag);
-            }
+        // Resolve alias synchronously, then fetch quantizations
+        const resolved = TemplateLoader.resolveAlias(input);
+        setResolvedModel(resolved);
+        const quantData = await apiService.getModelQuantizations(resolved);
+        if (quantData?.quantizations) {
+          setQuantizations(quantData.quantizations);
+          // Auto-select recommended
+          const recommended = quantData.quantizations.find((q: QuantizationInfo) => q.isRecommended);
+          if (recommended) {
+            setSelectedQuantization(recommended.tag);
           }
         }
       } catch {
@@ -1271,6 +1258,61 @@ export function LaunchPage() {
             <p className="mt-2 text-xs text-emerald-500">Command copied to clipboard</p>
           )}
         </div>
+
+        {/* INI Preview */}
+        {selectedModelPath && (
+          <div className="rounded-lg border border-border bg-muted/30">
+            <button
+              type="button"
+              onClick={() => setShowIniPreview((v) => !v)}
+              className="flex w-full items-center justify-between border-b border-border px-4 py-3 text-left"
+            >
+              <div className="flex items-center gap-2">
+                <Braces className="h-4 w-4 text-muted-foreground" />
+                <h3 className="text-sm font-medium">INI Config Preview</h3>
+              </div>
+              {showIniPreview ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+
+            {showIniPreview && (
+              <div className="p-4">
+                {previewLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Generating...
+                  </div>
+                ) : previewCommand ? (
+                  <pre className="max-h-60 overflow-auto rounded-md bg-background p-3 font-mono text-xs leading-relaxed text-foreground">
+{`[server]
+host = 127.0.0.1
+port = ${port || 12345}
+
+[model]
+path = ${selectedModelPath}
+ctx-size = ${form.context_size || 2048}
+gpu-layers = ${form.gpu_layers || 35}
+threads = ${form.threads || 8}
+seed = ${form.seed || -1}
+${form.embedding ? 'embedding = true' : ''}
+
+[sampling]
+temp = ${form.temp ?? 0.8}
+top-k = ${form.top_k || 40}
+top-p = ${form.top_p ?? 0.95}
+repeat-penalty = ${form.repeat_penalty ?? 1.1}
+frequency-penalty = ${form.frequency_penalty ?? 0.0}
+
+[performance]
+batch-size = ${form.batch_size || 512}
+cache-reuse = ${form.cache_reuse || 0}`}
+                  </pre>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Select a model to see the INI config.</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   </div>

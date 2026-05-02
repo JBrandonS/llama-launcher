@@ -26,6 +26,7 @@ _os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS",
 import argparse
 import http.server
 import socketserver
+import subprocess
 import sys
 import threading
 import webview
@@ -41,6 +42,58 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent if _SCRIPT_DIR.name == "ui" else _SCRIPT_DIR
 ASSETS_DIR = _PROJECT_ROOT / "ui" / "dist"
 
 DEFAULT_MIME = "text/plain"
+
+
+def _ensure_built() -> None:
+    """Ensure the UI is built. Build if dist/index.html is missing or source is newer."""
+    index_path = ASSETS_DIR / "index.html"
+
+    # Check if node_modules exists; install if not
+    node_modules = _PROJECT_ROOT / "ui" / "node_modules"
+    if not node_modules.is_dir():
+        print("Installing npm dependencies...", flush=True)
+        try:
+            subprocess.run(
+                ["npm", "install"],
+                cwd=str(_PROJECT_ROOT / "ui"),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"npm install failed: {e.stderr}", file=sys.stderr)
+            sys.exit(1)
+
+    # Check if build is needed
+    needs_build = not index_path.exists()
+
+    if not needs_build:
+        try:
+            src_dir = _PROJECT_ROOT / "ui" / "src"
+            src_mtime = max(
+                (f.stat().st_mtime for f in src_dir.rglob("*") if f.is_file()),
+                default=0,
+            )
+            dist_mtime = index_path.stat().st_mtime
+            needs_build = src_mtime > dist_mtime
+        except Exception:
+            pass
+
+    if needs_build:
+        print("Building UI...", flush=True)
+        try:
+            subprocess.run(
+                ["npm", "run", "build"],
+                cwd=str(_PROJECT_ROOT / "ui"),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            print("UI built successfully.", flush=True)
+        except subprocess.CalledProcessError as e:
+            print(f"npm build failed: {e.stderr}", file=sys.stderr)
+            print("Run 'cd ui && npm run build' manually.", file=sys.stderr)
+            sys.exit(1)
 
 
 class StaticHandler(http.server.SimpleHTTPRequestHandler):
@@ -138,24 +191,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not ASSETS_DIR.is_dir():
-        print(
-            f"Error: assets directory not found at {ASSETS_DIR}",
-            file=sys.stderr,
-        )
-        print(
-            "Run 'cd ui && npm run build' first.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    index_path = ASSETS_DIR / "index.html"
-    if not index_path.is_file():
-        print(
-            f"Error: index.html not found at {index_path}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    # Auto-build UI if needed
+    _ensure_built()
 
     ui_url = build_url(args.host, args.port)
     api_url = build_url(args.host, args.api_port)

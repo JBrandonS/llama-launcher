@@ -2,10 +2,11 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Search, Filter, Loader2, Database } from 'lucide-react';
+import { Search, Filter, Loader2, Database, FolderOpen } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
 import type { ModelInfo, ModelTypeGroup } from '@services/types';
+import { parseModelIni } from '@utils/iniParser';
 import { ModelsList } from './ModelsList';
 import { ModelEditDialog } from './ModelEditDialog';
 import { ModelDeleteDialog } from './ModelDeleteDialog';
@@ -26,6 +27,7 @@ export function ModelsPage() {
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [editingModel, setEditingModel] = useState<ModelInfo | null>(null);
   const [deletingModel, setDeletingModel] = useState<ModelInfo | null>(null);
+  const [iniModels, setIniModels] = useState<ModelInfo[]>([]);
 
   const { data: modelTypes, isLoading } = useQuery({
     queryKey: ['models/types'],
@@ -35,13 +37,19 @@ export function ModelsPage() {
 
   const allModels = useMemo(() => {
     if (!modelTypes) return [];
-    return modelTypes.flatMap((g: ModelTypeGroup) =>
+    const backendModels = modelTypes.flatMap((g: ModelTypeGroup) =>
       g.models.map((m) => ({
         ...m,
         _sizeNum: m.size_bytes || 0,
       }))
     );
-  }, [modelTypes]);
+    // Merge INI-loaded models (deduplicate by id)
+    const seen = new Set(backendModels.map((m) => m.id));
+    for (const im of iniModels) {
+      if (!seen.has(im.id)) backendModels.push({ ...im, _sizeNum: im.size_bytes || 0 });
+    }
+    return backendModels;
+  }, [modelTypes, iniModels]);
 
   const filteredAndSorted = useMemo(() => {
     let models = allModels;
@@ -97,6 +105,78 @@ export function ModelsPage() {
     }
   };
 
+  const handleLoadDirectory = async () => {
+    // Try File System Access API first
+    if ('showDirectoryPicker' in window) {
+      try {
+        const dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' });
+        const loaded: ModelInfo[] = [];
+        for await (const entry of dirHandle.values()) {
+          if (entry.kind === 'file' && entry.name.endsWith('.ini')) {
+            const file = await entry.getFile();
+            const text = await file.text();
+            const parsed = parseModelIni(text);
+            if (parsed) {
+              loaded.push({
+                id: entry.name,
+                path: parsed.modelPath || `./${entry.name}`,
+                type: 'local',
+                size_bytes: file.size,
+                size_human: '',
+                last_modified: new Date(file.lastModified).toISOString(),
+                tags: [],
+              });
+            }
+          }
+        }
+        if (loaded.length > 0) {
+          setIniModels(loaded);
+          toast.success(`Loaded ${loaded.length} config file(s)`);
+        } else {
+          toast.info('No .ini files found in directory');
+        }
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') toast.error('Failed to read directory');
+      }
+      return;
+    }
+
+    // Fallback: <input webkitdirectory>
+    const input: any = document.createElement('input');
+    input.type = 'file';
+    input.webkitdirectory = '';
+    input.accept = '.ini';
+    input.onchange = async () => {
+      const files = input.files;
+      if (!files) return;
+      const loaded: ModelInfo[] = [];
+      for (const file of files) {
+        if (file.name.endsWith('.ini')) {
+          const text = await file.text();
+          const parsed = parseModelIni(text);
+          if (parsed) {
+            loaded.push({
+              id: file.name,
+              path: parsed.modelPath || `./${file.webkitRelativePath || file.name}`,
+              type: 'local',
+              size_bytes: file.size,
+              size_human: '',
+              last_modified: new Date(file.lastModified).toISOString(),
+              tags: [],
+            });
+          }
+        }
+      }
+      if (loaded.length > 0) {
+        setIniModels(loaded);
+        toast.success(`Loaded ${loaded.length} config file(s)`);
+      } else {
+        toast.info('No .ini files found');
+      }
+    };
+    input.click();
+  };
+
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = { all: allModels.length };
     allModels.forEach((m) => {
@@ -123,9 +203,18 @@ export function ModelsPage() {
             Browse and manage your model library
           </p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Database className="h-4 w-4" />
-          <span>{allModels.length} model{allModels.length !== 1 ? 's' : ''}</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleLoadDirectory}
+            className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
+          >
+            <FolderOpen className="h-4 w-4" />
+            Load from Directory
+          </button>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Database className="h-4 w-4" />
+            <span>{allModels.length} model{allModels.length !== 1 ? 's' : ''}</span>
+          </div>
         </div>
       </div>
 
