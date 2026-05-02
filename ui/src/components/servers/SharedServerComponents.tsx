@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Loader2, RefreshCw, Eye } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { Badge } from '@components/common/Badge';
 import type { ServerInfo } from '@services/types';
@@ -49,10 +49,8 @@ export function StatusBadge({ status }: { status: string }) {
 
 export function ServerCard({
   server,
-  onOpen,
 }: {
   server: ServerInfo;
-  onOpen: (id: string) => void;
 }) {
   const { isLoading: isStopping, onStop } = useServerStop(server);
 
@@ -103,14 +101,6 @@ export function ServerCard({
         </div>
         <div className="flex shrink-0 flex-col gap-2">
           <button
-            onClick={() => onOpen(server.id)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border hover:bg-accent"
-            aria-label={`View ${server.name || server.id} details`}
-            title="View details"
-          >
-            <Eye className="h-4 w-4" />
-          </button>
-          <button
             onClick={onStop}
             disabled={server.status !== 'running' || isStopping}
             className={cn(
@@ -141,7 +131,7 @@ export function ServerRow({
   onOpen,
 }: {
   server: ServerInfo;
-  onOpen: (id: string) => void;
+  onOpen?: (id: string) => void;
 }) {
   const { isLoading: isStopping, onStop } = useServerStop(server);
 
@@ -149,7 +139,7 @@ export function ServerRow({
     <tr className="border-b last:border-b-0 hover:bg-accent/50">
       <td className="px-4 py-3">
         <button
-          onClick={() => onOpen(server.id)}
+          onClick={() => onOpen?.(server.id)}
           className="text-sm font-medium text-foreground hover:underline"
         >
           {server.name || server.id}
@@ -179,13 +169,6 @@ export function ServerRow({
       </td>
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => onOpen(server.id)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"
-            title="View details"
-          >
-            <Eye className="h-4 w-4" />
-          </button>
           <button
             onClick={onStop}
             disabled={server.status !== 'running' || isStopping}
