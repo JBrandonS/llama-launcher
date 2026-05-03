@@ -385,6 +385,16 @@ export function LaunchPage() {
     [servers]
   );
 
+  // Find currently selected model details and running status
+  const selectedModelInfo = useMemo(() => {
+    if (!selectedModelPath) return null;
+    const model = models.find((m) => m.path === selectedModelPath);
+    const server = servers?.find(
+      (s: ServerInfo) => s.status === 'running' && s.model === selectedModelPath
+    );
+    return { model, isRunning: !!server };
+  }, [selectedModelPath, models, servers]);
+
   useEffect(() => {
     const path = searchParams.get('path');
     const p = searchParams.get('port');
@@ -773,37 +783,34 @@ export function LaunchPage() {
         </div>
       )}
 
-      {/* Running model indicator */}
-      {servers && servers.some((s: ServerInfo) => s.status === 'running') && (
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
-          <div className="flex items-center gap-2">
-            <Radio className="h-4 w-4 text-emerald-500 animate-pulse" />
-            <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Running</span>
-          </div>
-          <div className="mt-2 space-y-1">
-            {servers.filter((s: ServerInfo) => s.status === 'running').map((s: ServerInfo) => (
-              <div key={s.id} className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">Server {s.port}</span>
-                {s.model && (
-                  <>
-                    <span>—</span>
-                    <span className="truncate" title={s.model}>{s.model.split('/').pop()}</span>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Currently selected model running indicator */}
-      {selectedModelPath && servers && servers.some((s: ServerInfo) => s.status === 'running' && s.model === selectedModelPath) && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+      {/* Selected model info banner */}
+      {selectedModelInfo && (
+        <div className={cn(
+          'rounded-lg border p-3',
+          selectedModelInfo.isRunning
+            ? 'border-emerald-500/30 bg-emerald-500/5'
+            : 'border-border/50 bg-card/50'
+        )}>
           <div className="flex items-center gap-2 text-sm">
-            <Radio className="h-4 w-4 text-amber-500 animate-pulse" />
-            <span className="text-amber-600 dark:text-amber-400 font-medium">
-              This model is currently running on a server
+            {selectedModelInfo.isRunning && (
+              <Radio className="h-4 w-4 shrink-0 text-emerald-500 animate-pulse" />
+            )}
+            <span className={cn(
+              'font-medium',
+              selectedModelInfo.isRunning
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-muted-foreground'
+            )}>
+              {selectedModelInfo.isRunning ? 'Running' : 'Selected'}
             </span>
+            <span className="text-xs text-muted-foreground">
+              — {selectedModelInfo.model?.path || selectedModelPath}
+            </span>
+            {selectedModelInfo.model && selectedModelInfo.model.size_human && (
+              <span className="text-xs text-muted-foreground">
+                ({selectedModelInfo.model.size_human})
+              </span>
+            )}
           </div>
         </div>
       )}

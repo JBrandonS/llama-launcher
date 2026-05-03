@@ -2,10 +2,10 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Search, Filter, Loader2, Database, FolderOpen } from 'lucide-react';
+import { Search, Filter, Loader2, Database, FolderOpen, Radio } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
-import type { ModelInfo, ModelTypeGroup } from '@services/types';
+import type { ModelInfo, ModelTypeGroup, ServerInfo } from '@services/types';
 import { parseModelIni } from '@utils/iniParser';
 import { ModelsList } from './ModelsList';
 import { ModelEditDialog } from './ModelEditDialog';
@@ -34,6 +34,24 @@ export function ModelsPage() {
     queryFn: apiService.getModelTypes,
     staleTime: 30_000,
   });
+
+  const { data: servers } = useQuery({
+    queryKey: ['servers'],
+    queryFn: apiService.getServers,
+    staleTime: 15_000,
+    retry: 2,
+  });
+
+  // Build a map of model path -> running server info
+  const runningModels = useMemo(() => {
+    const map = new Map<string, ServerInfo>();
+    for (const s of servers ?? []) {
+      if (s.status === 'running' && s.model) {
+        map.set(s.model, s);
+      }
+    }
+    return map;
+  }, [servers]);
 
   const allModels = useMemo(() => {
     if (!modelTypes) return [];
@@ -204,6 +222,12 @@ export function ModelsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {servers && servers.some((s: ServerInfo) => s.status === 'running') && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <Radio className="h-3 w-3 animate-pulse" />
+              {servers.filter((s: ServerInfo) => s.status === 'running').length} running
+            </span>
+          )}
           <button
             onClick={handleLoadDirectory}
             className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
@@ -297,6 +321,7 @@ export function ModelsPage() {
           onModelClick={handleModelClick}
           onEdit={(m) => setEditingModel(m)}
           onDelete={(m) => setDeletingModel(m)}
+          runningModels={runningModels}
         />
       )}
 
