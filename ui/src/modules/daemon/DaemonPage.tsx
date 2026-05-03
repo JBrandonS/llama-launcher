@@ -6,6 +6,7 @@ import { Badge } from '@components/common/Badge';
 import { apiService } from '@services/apiService';
 import { useServerMutation } from '@shared/hooks/useServerMutation';
 import type { LogEntry } from '@services/types';
+import { Copy } from 'lucide-react';
 import {
   Loader2,
   Play,
@@ -68,6 +69,14 @@ export function DaemonPage() {
     queryFn: () => apiService.getDaemonLogs(daemonVisibleCount),
     refetchInterval: daemonFollowMode ? 2000 : undefined,
     enabled: showLogViewer,
+  });
+
+  const [showServiceFile, setShowServiceFile] = useState(false);
+  const { data: serviceFileData, isLoading: serviceLoading } = useQuery({
+    queryKey: ['daemon-service-file'],
+    queryFn: () => apiService.getDaemonServiceFile(),
+    enabled: daemon?.status === 'running',
+    staleTime: 30_000,
   });
 
   const daemonLogEntries: LogEntry[] = (daemonLogsData?.entries ?? []).map((e) =>
@@ -344,6 +353,51 @@ export function DaemonPage() {
                   />
                 </div>
               </div>
+            </div>
+          )}
+
+          {daemon?.status === 'running' && (
+            <div className="rounded-lg border bg-card shadow-sm">
+              <button
+                type="button"
+                onClick={() => setShowServiceFile((v) => !v)}
+                className="flex w-full items-center justify-between border-b bg-muted/30 px-4 py-3 text-left"
+              >
+                <h3 className="flex items-center gap-2 font-medium">
+                  <Terminal className="h-4 w-4" />
+                  Service File
+                </h3>
+                {showServiceFile ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+
+              {showServiceFile && (
+                <div className="p-4">
+                  {serviceLoading ? (
+                    <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Loading…
+                    </div>
+                  ) : serviceFileData?.content ? (
+                    <div className="relative">
+                      <pre className="max-h-80 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
+                        {serviceFileData.content}
+                      </pre>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(serviceFileData.content);
+                          toast.success('Copied to clipboard');
+                        }}
+                        className="absolute right-2 top-2 rounded-md border bg-background/80 p-1.5 text-muted-foreground hover:bg-background"
+                      >
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="py-4 text-center text-sm text-muted-foreground">No service file available</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

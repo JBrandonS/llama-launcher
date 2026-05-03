@@ -96,42 +96,7 @@ class ModelManager:
         self.local_model_paths: List[Path] = config.local_model_search_paths
         self._semaphore = asyncio.Semaphore(4)
         self.registry = ModelRegistry()
-        self._aliases: Dict[str, str] = {}
-        self._load_aliases()
-
-    def _load_aliases(self) -> None:
-        """Load alias registry from model_aliases.json."""
-        alias_path = Path(__file__).parent / "model_aliases.json"
-        if alias_path.exists():
-            try:
-                with open(alias_path, "r") as f:
-                    self._aliases = json.load(f)
-                logger.debug(f"Loaded {len(self._aliases)} model aliases")
-            except Exception as e:
-                logger.warning(f"Failed to load model aliases: {e}")
-                self._aliases = {}
-
-    def resolve_alias(self, alias: str) -> Optional[str]:
-        """Resolve a model alias to a full HuggingFace identifier.
-
-        Returns the resolved identifier or None if no alias matches.
-        """
-        if not alias:
-            return None
-        # Direct match
-        if alias in self._aliases:
-            return self._aliases[alias]
-        # Case-insensitive match
-        lower = alias.lower().replace(".", "").replace("-", "")
-        for key, value in self._aliases.items():
-            if key.lower().replace(".", "").replace("-", "") == lower:
-                return value
-        return None
-
-    def is_alias(self, identifier: str) -> bool:
-        """Check if a string is a known alias (not a full HF identifier)."""
-        # Aliases don't contain "/" or ":" (HF identifiers do)
-        return bool(identifier and "/" not in identifier and ":" not in identifier and identifier in self._aliases)
+        self.registry = ModelRegistry()
 
     def is_hf_identifier(self, identifier: str) -> bool:
         """Check if a string looks like a HuggingFace model identifier."""

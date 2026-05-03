@@ -2,40 +2,24 @@ import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiService } from '@services/apiService';
-import { Loader2, Globe, Palette, Server, Database, Shield, Settings as SettingsIcon, Save } from 'lucide-react';
+import { Loader2, Globe, Palette, Save, Sun, Moon, Monitor } from 'lucide-react';
 import { cn } from '@utils/cn';
 
 // ─── UI-only settings type (frontend preferences, not sent to backend) ──
 interface UISettings {
   generalLanguage: string;
-  generalTheme: string;
   generalRefreshInterval: number;
   generalDataRetention: number;
-  generalAutoUpdate: boolean;
   appearanceTheme: string;
   appearanceCompactMode: boolean;
-  serverMaxConcurrent: number;
-  serverGpuSelection: string;
-  serverMemoryLimit: number;
-  apiBackendUrl: string;
-  apiAuthMethod: string;
-  securitySessionTimeout: number;
-  securityIpAllowlist: boolean;
-  advancedDebugMode: boolean;
-  advancedCustomPorts: string;
-  advancedNetworkBindings: string;
 }
 
 // ─── Tab definitions ──────────────────────────────────────────────
-type TabKey = 'general' | 'appearance' | 'server' | 'api' | 'security' | 'advanced';
+type TabKey = 'general' | 'appearance';
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: 'general', label: 'General', icon: Globe },
   { key: 'appearance', label: 'Appearance', icon: Palette },
-  { key: 'server', label: 'Server', icon: Server },
-  { key: 'api', label: 'API', icon: Database },
-  { key: 'security', label: 'Security', icon: Shield },
-  { key: 'advanced', label: 'Advanced', icon: SettingsIcon },
 ];
 
 const THEMES = [
@@ -46,22 +30,10 @@ const THEMES = [
 
 const DEFAULT_SETTINGS: UISettings = {
   generalLanguage: 'en',
-  generalTheme: 'system',
   generalRefreshInterval: 30,
   generalDataRetention: 7,
-  generalAutoUpdate: false,
   appearanceTheme: 'system',
   appearanceCompactMode: false,
-  serverMaxConcurrent: 4,
-  serverGpuSelection: '0',
-  serverMemoryLimit: 0,
-  apiBackendUrl: 'http://localhost:8501',
-  apiAuthMethod: 'none',
-  securitySessionTimeout: 30,
-  securityIpAllowlist: true,
-  advancedDebugMode: false,
-  advancedCustomPorts: '',
-  advancedNetworkBindings: '127.0.0.1',
 };
 
 // ─── Shared localStorage load helper ──────────────────────────────
@@ -85,20 +57,6 @@ function Field({ label, desc, children }: {
       {desc && <p className="text-xs text-muted-foreground">{desc}</p>}
       {children}
     </div>
-  );
-}
-
-function TextInput({ value, onChange, placeholder, type = 'text' }: {
-  value: string; onChange: (v: string) => void; placeholder?: string; type?: string;
-}) {
-  return (
-    <input
-      type={type}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
-    />
   );
 }
 
@@ -191,10 +149,6 @@ function GeneralTab({ settings, onChange }: { settings: UISettings; onChange: (p
         <SelectInput value={settings.generalLanguage ?? 'en'} onChange={(v) => onChange({ generalLanguage: v })} options={langs} />
       </Field>
 
-      <Field label="Theme" desc="Default theme for the application">
-        <SelectInput value={settings.generalTheme ?? 'system'} onChange={(v) => onChange({ generalTheme: v })} options={THEMES} />
-      </Field>
-
       <Field label="Auto-refresh interval" desc="How often to refresh server data (5-300 seconds)">
         <div className="flex items-center gap-2">
           <NumberInput
@@ -216,23 +170,43 @@ function GeneralTab({ settings, onChange }: { settings: UISettings; onChange: (p
         />
       </Field>
 
-      <Row label="Auto-update" desc="Automatically check for and apply updates">
-        <Switch
-          checked={settings.generalAutoUpdate ?? false}
-          onCheckedChange={(v) => onChange({ generalAutoUpdate: v })}
-          label="Toggle auto-update"
-        />
-      </Row>
-    </div>
+     </div>
   );
 }
 
 // ─── Appearance tab ───────────────────────────────────────────────
 function AppearanceTab({ settings, onChange }: { settings: UISettings; onChange: (p: Partial<UISettings>) => void }) {
+  const themeIcons: Record<string, React.ElementType> = {
+    light: Sun,
+    dark: Moon,
+    system: Monitor,
+  };
+
   return (
     <div className="space-y-6">
-      <Field label="Color scheme" desc="Theme applied to the dashboard">
-        <SelectInput value={settings.appearanceTheme ?? 'system'} onChange={(v) => onChange({ appearanceTheme: v })} options={THEMES} />
+      <Field label="Theme" desc="Choose your preferred color scheme">
+        <div className="grid grid-cols-3 gap-2">
+          {THEMES.map((t) => {
+            const Icon = themeIcons[t.value];
+            const active = settings.appearanceTheme === t.value;
+            return (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => onChange({ appearanceTheme: t.value })}
+                className={cn(
+                  'flex flex-col items-center gap-2 rounded-lg border px-3 py-4 text-sm transition-colors',
+                  active
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border hover:bg-accent'
+                )}
+              >
+                <Icon className="h-5 w-5" />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </Field>
 
       <Row label="Compact mode" desc="Reduce spacing and padding across the UI">
@@ -252,143 +226,6 @@ function AppearanceTab({ settings, onChange }: { settings: UISettings; onChange:
           <span className="inline-flex rounded-full bg-destructive/15 text-destructive px-2.5 py-0.5 text-xs font-medium">Error</span>
           <span className="inline-flex rounded-full bg-blue-500/15 text-blue-500 px-2.5 py-0.5 text-xs font-medium">Info</span>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Server tab ───────────────────────────────────────────────────
-function ServerTab({ settings, onChange }: { settings: UISettings; onChange: (p: Partial<UISettings>) => void }) {
-  const gpuOpts = Array.from({ length: 8 }, (_, i) => ({ label: `GPU ${i}`, value: String(i) }));
-
-  return (
-    <div className="space-y-6">
-      <Field label="Max concurrent servers" desc="Maximum servers that can run at once">
-        <NumberInput
-          value={settings.serverMaxConcurrent ?? 4}
-          onChange={(v) => onChange({ serverMaxConcurrent: v })}
-          min={1}
-          max={16}
-        />
-      </Field>
-
-      <Field label="Default GPU" desc="GPU index used for new server launches">
-        <SelectInput value={settings.serverGpuSelection ?? '0'} onChange={(v) => onChange({ serverGpuSelection: v })} options={gpuOpts} />
-      </Field>
-
-      <Field label="Memory limit (GB)" desc="Memory cap per server, 0 = unlimited">
-        <NumberInput
-          value={settings.serverMemoryLimit ?? 0}
-          onChange={(v) => onChange({ serverMemoryLimit: v })}
-          min={0}
-          max={256}
-        />
-      </Field>
-    </div>
-  );
-}
-
-// ─── API tab ──────────────────────────────────────────────────────
-function ApiTab({ settings, onChange }: { settings: UISettings; onChange: (p: Partial<UISettings>) => void }) {
-  const authOpts = [
-    { label: 'None', value: 'none' },
-    { label: 'API Key', value: 'api_key' },
-    { label: 'Bearer Token', value: 'bearer' },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <Field label="Backend URL" desc="Base URL for the API server">
-        <TextInput value={settings.apiBackendUrl ?? 'http://localhost:8501'} onChange={(v) => onChange({ apiBackendUrl: v })} placeholder="http://localhost:8501" />
-      </Field>
-
-      <Field label="Authentication method" desc="How requests are authenticated to the backend">
-        <SelectInput
-          value={settings.apiAuthMethod ?? 'none'}
-          onChange={(v) => onChange({ apiAuthMethod: v })}
-          options={authOpts}
-        />
-      </Field>
-    </div>
-  );
-}
-
-// ─── Security tab ─────────────────────────────────────────────────
-function SecurityTab({ settings, onChange }: { settings: UISettings; onChange: (p: Partial<UISettings>) => void }) {
-  return (
-    <div className="space-y-6">
-      <Field label="Session timeout (minutes)" desc="Auto-logout after inactivity">
-        <NumberInput
-          value={settings.securitySessionTimeout ?? 30}
-          onChange={(v) => onChange({ securitySessionTimeout: v })}
-          min={5}
-          max={480}
-        />
-      </Field>
-
-      <Row label="IP allowlist" desc="Restrict access to specific IP ranges">
-        <Switch
-          checked={settings.securityIpAllowlist ?? false}
-          onCheckedChange={(v) => onChange({ securityIpAllowlist: v })}
-          label="Toggle IP allowlist"
-        />
-      </Row>
-
-      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
-        <h4 className="text-sm font-medium text-destructive">Security warning</h4>
-        <p className="text-xs text-destructive/80">
-          <strong>This project is NOT secure.</strong> It was vibe-coded as a test using local LLMs (Qwen 3.6, OpenCode, oh-my-openagent).
-          Only an absolute fool would consider this project secure in any way. Do not expose it to untrusted networks.
-          IP allowlist and localhost-only bindings are recommended defaults.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Advanced tab ─────────────────────────────────────────────────
-function AdvancedTab({ settings, onChange }: { settings: UISettings; onChange: (p: Partial<UISettings>) => void }) {
-  return (
-    <div className="space-y-6">
-      <Row label="Debug mode" desc="Enable verbose logging and development tools">
-        <Switch
-          checked={settings.advancedDebugMode ?? false}
-          onCheckedChange={(v) => onChange({ advancedDebugMode: v })}
-          label="Toggle debug mode"
-        />
-      </Row>
-
-      <Field label="Custom ports" desc="Comma-separated custom ports (e.g. 8080,8443)">
-        <TextInput
-          value={settings.advancedCustomPorts ?? ''}
-          onChange={(v) => onChange({ advancedCustomPorts: v })}
-          placeholder="8080,8443"
-        />
-      </Field>
-
-      <Field label="Network bindings" desc="Interface to bind the API server to">
-        <TextInput
-          value={settings.advancedNetworkBindings ?? '127.0.0.1'}
-          onChange={(v) => onChange({ advancedNetworkBindings: v })}
-          placeholder="127.0.0.1"
-        />
-      </Field>
-
-      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
-        <h4 className="text-sm font-medium text-destructive">Danger zone</h4>
-        <p className="text-xs text-muted-foreground">These actions cannot be undone.</p>
-        <button
-          type="button"
-          onClick={() => {
-            if (window.confirm('Reset all settings to defaults?')) {
-              onChange(DEFAULT_SETTINGS);
-              toast.success('Settings reset to defaults');
-            }
-          }}
-          className="rounded-md border border-destructive/30 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
-        >
-          Reset to Defaults
-        </button>
       </div>
     </div>
   );
@@ -446,10 +283,6 @@ export function SettingsPage() {
   const tabs: Record<TabKey, React.ComponentType<{ settings: UISettings; onChange: (p: Partial<UISettings>) => void }>> = {
     general: GeneralTab,
     appearance: AppearanceTab,
-    server: ServerTab,
-    api: ApiTab,
-    security: SecurityTab,
-    advanced: AdvancedTab,
   };
 
   return (

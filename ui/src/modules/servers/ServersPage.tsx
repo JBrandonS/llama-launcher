@@ -5,12 +5,12 @@ import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
 import { ServerRow, ServerCard, useMediaQuery, RefreshButton } from '@components/servers/SharedServerComponents';
 
-type SortField = 'id' | 'name' | 'status' | 'gpu' | 'uptime';
+type SortField = 'name' | 'status' | 'port' | 'model' | 'gpu' | 'vram' | 'uptime';
 type SortDir = 'asc' | 'desc';
 
 export function ServersPage() {
   const [search, setSearch] = useState('');
-  const [sortField, setSortField] = useState<SortField>('id');
+   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [page, setPage] = useState(1);
   const limit = 10;
@@ -44,16 +44,25 @@ export function ServersPage() {
     .sort((a, b) => {
       let cmp = 0;
       switch (sortField) {
-        case 'id':
-          cmp = (a.id ?? '').localeCompare(b.id ?? '');
-          break;
         case 'name':
-          cmp = (a.name ?? '').localeCompare(b.name ?? '');
+          cmp = ((a.name || a.id) ?? '').localeCompare((b.name || b.id) ?? '');
           break;
         case 'status':
           cmp = (a.status ?? '').localeCompare(b.status ?? '');
           break;
+        case 'port':
+          cmp = (a.port ?? 0) - (b.port ?? 0);
+          break;
+        case 'model':
+          cmp = (a.model ?? '').localeCompare(b.model ?? '');
+          break;
         case 'gpu':
+          cmp = ((a.gpuInfo?.model ?? '').length || 0) - ((b.gpuInfo?.model ?? '').length || 0);
+          if (cmp === 0) {
+            cmp = (a.gpuInfo?.model ?? '').localeCompare(b.gpuInfo?.model ?? '');
+          }
+          break;
+        case 'vram':
           cmp = (a.gpuInfo?.memoryUsed ?? 0) - (b.gpuInfo?.memoryUsed ?? 0);
           break;
         case 'uptime':
@@ -111,9 +120,6 @@ export function ServersPage() {
               <ServerCard
                 key={server.id}
                 server={server}
-                onOpen={(id) => {
-                  window.location.href = `/servers/${id}`;
-                }}
               />
             ))
           )}
@@ -125,11 +131,13 @@ export function ServersPage() {
               <tr className="border-b bg-muted/30 text-muted-foreground">
                 {(
                   [
-                    ['id', 'Name'],
+                    ['name', 'Name'],
                     ['status', 'Status'],
-                    ['name', 'Port'],
-                    ['gpu', 'Model'],
-                    ['uptime', 'GPU'],
+                    ['port', 'Port'],
+                    ['model', 'Model'],
+                    ['gpu', 'GPU'],
+                    ['vram', 'VRAM'],
+                    ['uptime', 'Uptime'],
                   ] as [SortField, string][]
                 ).map(([field, label]) => (
                   <th

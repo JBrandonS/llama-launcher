@@ -71,8 +71,6 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_get_model_types()
             elif path.startswith("/models/") and path.count("/") == 2:
                 self._handle_get_model_by_id(path)
-            elif path == "/models/resolve":
-                self._handle_get_model_resolve()
             elif path == "/models/quantizations":
                 self._handle_get_model_quantizations()
             elif path == "/servers" or path.startswith("/servers/"):
@@ -95,6 +93,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_get_daemon_logs()
             elif path == "/daemon/service":
                 self._handle_get_daemon_service()
+            elif path == "/daemon/service-file":
+                self._handle_get_daemon_service_file()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -120,6 +120,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_run()
             elif path == "/launch/preview":
                 self._handle_post_launch_preview()
+            elif path == "/launch/ini":
+                self._handle_post_launch_ini()
             elif path == "/settings":
                 self._handle_put_settings()
             elif path == "/validate":
@@ -184,24 +186,6 @@ class APIHandler(BaseHTTPRequestHandler):
             })
         self._send_json(200, result)
 
-    def _handle_get_model_resolve(self) -> None:
-        """Resolve an alias to a full HuggingFace model identifier."""
-        qs = self.path.split("?", 1)[1] if "?" in self.path else ""
-        alias = ""
-        for param in qs.split("&"):
-            if param.startswith("alias="):
-                alias = param.split("=", 1)[1]
-
-        if not alias:
-            self._send_json(400, {"error": "alias parameter is required"})
-            return
-
-        resolved = self.ctx.model_manager.resolve_alias(alias)
-        if resolved:
-            self._send_json(200, {"alias": alias, "resolved": resolved})
-        else:
-            self._send_json(404, {"error": f"Alias not found: {alias}", "alias": alias})
-
     def _handle_get_model_quantizations(self) -> None:
         """Get available quantization variants for a HuggingFace model."""
         qs = self.path.split("?", 1)[1] if "?" in self.path else ""
@@ -213,12 +197,6 @@ class APIHandler(BaseHTTPRequestHandler):
         if not model_id:
             self._send_json(400, {"error": "model parameter is required"})
             return
-
-        # Resolve alias if needed
-        if self.ctx.model_manager.is_alias(model_id):
-            resolved = self.ctx.model_manager.resolve_alias(model_id)
-            if resolved:
-                model_id = resolved
 
         try:
             quantizations = asyncio.run(self.ctx.model_manager.get_quantizations(model_id))
@@ -239,12 +217,6 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "model_id is required"})
             return
 
-        # Resolve alias if needed
-        if self.ctx.model_manager.is_alias(model_id):
-            resolved = self.ctx.model_manager.resolve_alias(model_id)
-            if resolved:
-                model_id = resolved
-
         try:
             result = download_model(model_id, local_dir=local_dir, quantization=quantization or None)
             self._send_json(200, {
@@ -264,7 +236,6 @@ class APIHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         path = body.get("path", body.get("model_path", ""))
         name = body.get("name", "")
-        aliases = body.get("aliases", [])
 
         if not path:
             self._send_json(400, {"error": "path is required"})
@@ -276,10 +247,7 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         model_id = name or model_path.stem
-        self.ctx.model_manager.registry.add_model(model_id, model_path, {"aliases": aliases})
-
-        # Save aliases
-        self.ctx.save_aliases()
+        self.ctx.model_manager.registry.add_model(model_id, model_path, {})
 
         self._send_json(201, {
             "id": model_id,
@@ -288,7 +256,6 @@ class APIHandler(BaseHTTPRequestHandler):
             "size_human": ServerContext.human_size(model_path.stat().st_size),
             "last_modified": datetime.fromtimestamp(model_path.stat().st_mtime).isoformat(timespec="seconds"),
             "tags": ["gguf", "local"],
-            "aliases": aliases,
         })
 
     def _handle_put_model(self, path: str) -> None:
@@ -302,7 +269,6 @@ class APIHandler(BaseHTTPRequestHandler):
 
         body = self._read_body()
         name = body.get("name")
-        aliases = body.get("aliases")
 
         model_info = self.ctx.model_manager.registry.get(model_id)
         if not model_info:
@@ -315,17 +281,10 @@ class APIHandler(BaseHTTPRequestHandler):
             self.ctx.model_manager.registry.add_model(name, model_info["path"], model_info.get("metadata"))
             model_id = name
 
-        # Update metadata (aliases)
-        metadata = model_info.get("metadata") or {}
-        if aliases is not None:
-            metadata["aliases"] = aliases
-        self.ctx.model_manager.registry.update_model(model_id, metadata)
-        self.ctx.save_aliases()
-
         self._send_json(200, {
             "id": model_id,
             "path": str(model_info["path"]),
-            "metadata": metadata,
+            "metadata": model_info.get("metadata"),
         })
 
     def _handle_delete_model(self, path: str) -> None:
@@ -360,7 +319,6 @@ class APIHandler(BaseHTTPRequestHandler):
                     "last_modified": "",
                     "tags": ["gguf", "local"],
                     "type": type_name,
-                    "aliases": md.get("aliases", []),
                 })
             result.append({"type": type_name, "models": formatted})
         self._send_json(200, result)
@@ -385,8 +343,7 @@ class APIHandler(BaseHTTPRequestHandler):
             "size_bytes": model_info["path"].stat().st_size,
             "size_human": ServerContext.human_size(model_info["path"].stat().st_size),
             "last_modified": datetime.fromtimestamp(model_info["path"].stat().st_mtime).isoformat(timespec="seconds"),
-            "tags": ["gguf", "local"],
-            "aliases": md.get("aliases", []),
+        "tags": ["gguf", "local"],
         })
 
     def _handle_get_servers(self, path: str) -> None:
@@ -422,7 +379,7 @@ class APIHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_get_logs(self) -> None:
-        log_dir = Path.home() / ".llama_launcher" / "logs"
+        log_dir = Path.home() / ".cache" / "llama-launcher" / "logs"
         limit = 200
         server_filter = None
         level_filter = None
@@ -789,7 +746,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def _handle_get_daemon_logs(self) -> None:
         """Get daemon logs."""
-        log_dir = Path.home() / ".llama_launcher" / "logs"
+        log_dir = Path.home() / ".cache" / "llama-launcher" / "logs"
         limit = 200
         if "?" in self.path:
             qs = self.path.split("?", 1)[1]
@@ -839,6 +796,16 @@ class APIHandler(BaseHTTPRequestHandler):
             "content": svc_path_obj.read_text() if svc_path_obj.exists() else "",
         })
 
+    def _handle_get_daemon_service_file(self) -> None:
+        """Return the raw service file content."""
+        svc_path = daemon_module.get_service_path()
+        if svc_path is None:
+            self._send_json(200, {"content": ""})
+            return
+        svc_path_obj = Path(svc_path)
+        content = svc_path_obj.read_text() if svc_path_obj.exists() else ""
+        self._send_json(200, {"content": content})
+
     # ── POST handlers ───────────────────────────────────────────────
 
     def _handle_post_server(self) -> None:
@@ -863,7 +830,7 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         # Determine log file path for this server
-        log_dir = Path.home() / ".llama_launcher" / "logs"
+        log_dir = Path.home() / ".cache" / "llama-launcher" / "logs"
         log_file = str(log_dir / f"server_{port}.log")
 
         try:
@@ -903,6 +870,36 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"command": preview})
         except Exception as e:
             logger.exception("Failed to generate command preview")
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_post_launch_ini(self) -> None:
+        body = self._read_body()
+        model_path = body.get("model", body.get("model_path", ""))
+        args = body.get("args", {})
+
+        if not model_path:
+            self._send_json(400, {"error": "model_path is required"})
+            return
+
+        try:
+            from backend.ini_writer import write_server_ini
+            ini = write_server_ini(
+                model_path=model_path,
+                host=args.get("host", "127.0.0.1"),
+                port=args.get("port", 12345),
+                n_ctx=int(args.get("context_size", 2048)),
+                n_gpu_layers=int(args.get("gpu_layers", -1)),
+                threads=int(args.get("threads", 8)),
+                temp=float(args.get("temperature", 0.7)),
+                top_k=int(args.get("top_k", 40)),
+                top_p=float(args.get("top_p", 0.95)),
+                n_predict=int(args.get("n_predict", 512)),
+                embedding=bool(args.get("embedding", False)),
+                rope_scaling=args.get("rope_scaling", "none"),
+            )
+            self._send_json(200, {"ini": ini})
+        except Exception as e:
+            logger.exception("Failed to generate INI config")
             self._send_json(500, {"error": str(e)})
 
     def _handle_stop_server(self, path: str) -> None:

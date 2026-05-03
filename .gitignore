@@ -37,6 +37,7 @@ config.yaml
 # Logs
 *.log
 logs/
+!ui/src/modules/logs/
 
 # IDE
 .idea/
