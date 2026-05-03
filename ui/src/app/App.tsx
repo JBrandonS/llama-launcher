@@ -15,6 +15,7 @@ const LogsPage = lazy(() => import('@modules/logs/LogsPage').then(m => ({ defaul
 const SettingsPage = lazy(() => import('@modules/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const LaunchPage = lazy(() => import('@modules/launch/LaunchPage').then(m => ({ default: m.LaunchPage })));
 const ModelsPage = lazy(() => import('@modules/models/ModelsPage').then(m => ({ default: m.ModelsPage })));
+const BenchmarkPage = lazy(() => import('@modules/benchmark/BenchmarkPage').then(m => ({ default: m.BenchmarkPage })));
 
 const loading = (
   <div className="flex h-full items-center justify-center">
@@ -70,6 +71,9 @@ export default function App() {
               } />
                <Route path="/models" element={
                 <ErrorBoundary><ModelsPage /></ErrorBoundary>
+              } />
+              <Route path="/benchmark" element={
+                <ErrorBoundary><BenchmarkPage /></ErrorBoundary>
               } />
               <Route path="/settings" element={
                 <ErrorBoundary><SettingsPage /></ErrorBoundary>

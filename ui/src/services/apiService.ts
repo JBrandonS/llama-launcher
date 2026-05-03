@@ -1,6 +1,9 @@
 import type {
   ApiResponse,
   AddModelRequest,
+  BenchmarkResult,
+  BenchmarkRunRequest,
+  BenchmarkRunResponse,
   DaemonConfig,
   DaemonInfo,
   DownloadModelRequest,
@@ -279,5 +282,24 @@ export const apiService = {
       body: JSON.stringify({ config }),
     });
     return res.ok ? (res.data as LaunchResponse) : { serverId: '', message: '' };
+  },
+
+  // ── Benchmark ────────────────────────────────────────────────
+  async benchmarkRun(config: BenchmarkRunRequest): Promise<BenchmarkRunResponse | null> {
+    const res = await request<BenchmarkRunResponse>('/benchmark/run', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+    return res.ok ? (res.data as BenchmarkRunResponse) : null;
+  },
+
+  async getBenchmarkResults(): Promise<BenchmarkResult[]> {
+    const res = await request<BenchmarkResult[]>('/benchmark/results');
+    return res.ok ? (res.data as BenchmarkResult[]) : [];
+  },
+
+  async clearBenchmarkResults(): Promise<boolean> {
+    const res = await request('/benchmark/clear', { method: 'DELETE' });
+    return res.ok;
   },
 };
