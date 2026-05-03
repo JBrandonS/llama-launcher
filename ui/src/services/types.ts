@@ -70,11 +70,6 @@ export interface UpdateModelRequest {
   aliases?: string[];
 }
 
-export interface ModelResolveResponse {
-  alias: string;
-  resolved: string;
-}
-
 export interface ModelQuantizationsResponse {
   model: string;
   quantizations: QuantizationInfo[];

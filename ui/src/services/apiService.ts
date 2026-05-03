@@ -11,7 +11,6 @@ import type {
   LogStreamResponse,
   ModelInfo,
   ModelQuantizationsResponse,
-  ModelResolveResponse,
   ModelTypeGroup,
   ServerConfig,
   ServerInfo,
@@ -103,11 +102,6 @@ export const apiService = {
   async getModels(): Promise<ModelInfo[]> {
     const res = await request('/models');
     return res.ok ? (res.data as ModelInfo[]) : [];
-  },
-
-  async resolveAlias(alias: string): Promise<ModelResolveResponse | null> {
-    const res = await request<ModelResolveResponse>(`/models/resolve?alias=${encodeURIComponent(alias)}`);
-    return res.ok ? (res.data as ModelResolveResponse) : null;
   },
 
   async getModelQuantizations(model: string): Promise<ModelQuantizationsResponse | null> {

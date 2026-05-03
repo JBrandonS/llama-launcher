@@ -96,7 +96,6 @@ class ModelManager:
         self.local_model_paths: List[Path] = config.local_model_search_paths
         self._semaphore = asyncio.Semaphore(4)
         self.registry = ModelRegistry()
-        self.registry = ModelRegistry()
 
     def is_hf_identifier(self, identifier: str) -> bool:
         """Check if a string looks like a HuggingFace model identifier."""
