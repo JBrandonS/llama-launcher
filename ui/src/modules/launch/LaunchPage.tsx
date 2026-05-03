@@ -3,14 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, ChevronUp, FolderOpen, Download, Globe, Terminal, Copy, Loader2 } from 'lucide-react';
+import { Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, ChevronUp, FolderOpen, Download, Globe, Terminal, Copy, Loader2, Save, Upload, Radio } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
 import type { ServerInfo, Settings as SettingsType, ValidationError, QuantizationInfo } from '@services/types';
 import { PresetsManager } from '@components/launch/PresetsManager';
 import type { Preset } from '@components/launch/PresetsManager';
 import { TemplateSelector } from '@components/launch/TemplateSelector';
-import { TemplateLoader } from '@utils/templateLoader';
+import { TemplateLoader, saveTemplateAsIni, loadTemplateFromIni } from '@utils/templateLoader';
 import {
   CollapsibleSection,
   type SectionDef,
@@ -253,6 +253,7 @@ export function LaunchPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showIniPreview, setShowIniPreview] = useState(false);
+  const loadTemplateInputRef = useRef<HTMLInputElement>(null);
 
   const getPreview = useCallback(async () => {
     if (!selectedModelPath) {
@@ -547,6 +548,125 @@ export function LaunchPage() {
     }
   }, [applyTemplateArgs]);
 
+  // ── Save template to INI file ────────────────────────────────
+  const handleSaveTemplate = useCallback(async () => {
+    if (!selectedModelPath) {
+      toast.error('No model selected');
+      return;
+    }
+    const iniContent = saveTemplateAsIni(form as any, selectedModelPath);
+    const name = selectedModelPath.split('/').pop()?.replace(/\.gguf$/, '') || 'config';
+
+    // Try File System Access API first
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: `${name}.ini`,
+          types: [{
+            description: 'llama.cpp config',
+            accept: { 'text/plain': ['.ini', '.txt'] },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(iniContent);
+        await writable.close();
+        toast.success('Template saved');
+        return;
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') {
+          console.warn('showSaveFilePicker failed, falling back', e);
+        }
+      }
+    }
+
+    // Fallback: blob download
+    const blob = new Blob([iniContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}.ini`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Template saved');
+  }, [form, selectedModelPath]);
+
+  // ── Load template from file (INI or JSON) ───────────────────
+  const handleLoadTemplate = useCallback(async () => {
+    try {
+      const handle = await (window as any).showOpenFilePicker({
+        types: [{
+          description: 'Template files',
+          accept: { 'text/plain': ['.ini', '.txt', '.json'] },
+        }],
+        multiple: false,
+      });
+      const file = await handle[0].getFile();
+      await processLoadedFile(file);
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        toast.error('Failed to load template');
+      }
+    }
+  }, []);
+
+  // Shared handler for both file picker and input element
+  const processLoadedFile = useCallback(async (file: File) => {
+    try {
+      const text = await file.text();
+      const ext = file.name.split('.').pop()?.toLowerCase();
+
+      if (ext === 'ini' || ext === 'txt') {
+        const { args, modelPath } = loadTemplateFromIni(text);
+        // Apply loaded args to form
+        const newForm: Partial<LaunchFormState> = {};
+        for (const [key, value] of Object.entries(args)) {
+          if (KNOWN_FORM_FIELDS.has(key as keyof LaunchFormState)) {
+            (newForm as Record<string, unknown>)[key] = value;
+          }
+        }
+        if (Object.keys(newForm).length > 0) {
+          setForm((prev) => ({ ...prev, ...newForm }));
+        }
+        if (args.port !== undefined) {
+          setPort(Number(args.port));
+        }
+        // Auto-select model path if different
+        if (modelPath && modelPath !== selectedModelPath) {
+          setSelectedModelPath(modelPath);
+        }
+        toast.success('Template loaded');
+      } else {
+        // JSON format
+        const data = JSON.parse(text);
+        if (data.args) {
+          const newForm: Partial<LaunchFormState> = {};
+          for (const [key, value] of Object.entries(data.args)) {
+            if (KNOWN_FORM_FIELDS.has(key as keyof LaunchFormState)) {
+              (newForm as Record<string, unknown>)[key] = value;
+            }
+          }
+          if (Object.keys(newForm).length > 0) {
+            setForm((prev) => ({ ...prev, ...newForm }));
+          }
+          if (data.port !== undefined) {
+            setPort(Number(data.port));
+          }
+        }
+        toast.success('Template loaded');
+      }
+    } catch (err) {
+      toast.error('Failed to parse template file');
+      console.error(err);
+    }
+  }, [selectedModelPath]);
+
+  const handleLoadTemplateInput = useCallback(async () => {
+    const file = loadTemplateInputRef.current?.files?.[0];
+    if (file) {
+      await processLoadedFile(file);
+    }
+  }, [processLoadedFile]);
+
   useEffect(() => {
     if (!selectedModelPath) {
       setSelectedTemplateId('');
@@ -649,6 +769,41 @@ export function LaunchPage() {
                 ))}
               </ul>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Running model indicator */}
+      {servers && servers.some((s: ServerInfo) => s.status === 'running') && (
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+          <div className="flex items-center gap-2">
+            <Radio className="h-4 w-4 text-emerald-500 animate-pulse" />
+            <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Running</span>
+          </div>
+          <div className="mt-2 space-y-1">
+            {servers.filter((s: ServerInfo) => s.status === 'running').map((s: ServerInfo) => (
+              <div key={s.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Server {s.port}</span>
+                {s.model && (
+                  <>
+                    <span>—</span>
+                    <span className="truncate" title={s.model}>{s.model.split('/').pop()}</span>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Currently selected model running indicator */}
+      {selectedModelPath && servers && servers.some((s: ServerInfo) => s.status === 'running' && s.model === selectedModelPath) && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="flex items-center gap-2 text-sm">
+            <Radio className="h-4 w-4 text-amber-500 animate-pulse" />
+            <span className="text-amber-600 dark:text-amber-400 font-medium">
+              This model is currently running on a server
+            </span>
           </div>
         </div>
       )}
@@ -806,6 +961,42 @@ export function LaunchPage() {
           selectedTemplateId={selectedTemplateId}
           onTemplateSelect={handleTemplateSelect}
         />
+
+        {/* Template save/load buttons */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSaveTemplate}
+            disabled={!selectedModelPath}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-md border bg-transparent px-3 py-1.5 text-xs font-medium transition-colors',
+              selectedModelPath
+                ? 'hover:bg-accent text-foreground'
+                : 'cursor-not-allowed opacity-50 text-muted-foreground'
+            )}
+            title="Save current config as INI template"
+          >
+            <Save className="h-3.5 w-3.5" />
+            Save Template
+          </button>
+          <button
+            type="button"
+            onClick={handleLoadTemplate}
+            className="inline-flex items-center gap-1.5 rounded-md border bg-transparent px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent text-foreground"
+            title="Load template from INI or JSON file"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Load Template
+          </button>
+          {/* Hidden file input for fallback load */}
+          <input
+            type="file"
+            accept=".ini,.txt,.json"
+            onChange={handleLoadTemplateInput}
+            className="hidden"
+            ref={loadTemplateInputRef}
+          />
+        </div>
 
         <div className="flex justify-end pt-2">
           <button
