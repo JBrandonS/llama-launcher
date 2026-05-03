@@ -1,59 +1,60 @@
-import { useNavigate } from 'react-router-dom';
-import { Search, Moon, Sun } from 'lucide-react';
+import { Moon, Sun, Monitor } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
 export function TopBar() {
-  const navigate = useNavigate();
-  const [dark, setDark] = useState(() =>
-    document.documentElement.classList.contains('dark')
-  );
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
+    return (localStorage.getItem('theme') as 'light' | 'dark' | 'system') || 'system';
+  });
 
-  const toggleDark = useCallback(() => {
-    setDark((prev) => {
-      const next = !prev;
-      document.documentElement.classList.toggle('dark', next);
-      localStorage.setItem('theme', next ? 'dark' : 'light');
-      return next;
-    });
+  const applyTheme = useCallback((t: 'light' | 'dark' | 'system') => {
+    if (t === 'system') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.classList.toggle('dark', prefersDark);
+    } else {
+      document.documentElement.classList.toggle('dark', t === 'dark');
+    }
+    localStorage.setItem('theme', t);
+    setTheme(t);
   }, []);
 
   useEffect(() => {
-    const stored = localStorage.getItem('theme');
-    if (stored === 'dark') {
-      document.documentElement.classList.add('dark');
-    }
+    const stored = (localStorage.getItem('theme') as 'light' | 'dark' | 'system') || 'system';
+    applyTheme(stored);
+  }, [applyTheme]);
+
+  // Listen for theme changes from Settings page
+  useEffect(() => {
+    const handler = () => {
+      const stored = (localStorage.getItem('theme') as 'light' | 'dark' | 'system') || 'system';
+      setTheme(stored);
+    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
   }, []);
+
+  const nextTheme = () => {
+    const order: ('light' | 'dark' | 'system')[] = ['light', 'dark', 'system'];
+    const idx = order.indexOf(theme);
+    applyTheme(order[(idx + 1) % order.length]);
+  };
 
   return (
     <header className="flex h-14 items-center justify-between border-b bg-card px-4">
-      <div className="flex items-center gap-2">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            placeholder="Search servers..."
-            className="h-8 w-64 rounded-md border bg-background pl-8 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                navigate(`/servers?q=${encodeURIComponent(e.currentTarget.value.trim())}`);
-              }
-            }}
-          />
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <button
-          onClick={toggleDark}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"
-          aria-label="Toggle theme"
-        >
-          {dark ? (
-            <Sun className="h-4 w-4" />
-          ) : (
-            <Moon className="h-4 w-4" />
-          )}
-        </button>
-      </div>
+      <div />
+      <button
+        onClick={nextTheme}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"
+        aria-label="Toggle theme"
+        title={`Theme: ${theme}`}
+      >
+        {theme === 'dark' ? (
+          <Sun className="h-4 w-4" />
+        ) : theme === 'light' ? (
+          <Moon className="h-4 w-4" />
+        ) : (
+          <Monitor className="h-4 w-4" />
+        )}
+      </button>
     </header>
   );
 }

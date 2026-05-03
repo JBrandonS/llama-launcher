@@ -1,0 +1,13 @@
+1. Fix the llama-launcher script so it will correctly build the UI when needed.
+2. Install pynvml into the local venv
+3. when saving the template allow a file selection
+4. Fix the location of the main content to be centered and not right justified.
+5. Remove the Quick Launch page, for now.
+6. The models page should let you select a dir, that it will search for llama.cpp .ini files to look at.
+7. Remove the alias code from the server.
+8. Remove the top bar that has the theme selection on every page.
+9. The Daemon and launch pages should have an advanced option showing the raw files, the daemon should show the script it will be using while the launch server should so the .ini file.
+10. Make sure when you save or load a model template this is supporting llama.cpp's .ini files
+11. When running a server make sure you set the logging output path and that logs is looking for those. By default this should be `~/.cache/llamal-launcher/logs/`, you may need to create this directory path.
+12. In settings remove the auto-update button, ensure the compact mode button works, remove the server options, ensure the API options are working or remove them, same with the security, and advanced.
+13. Bump the version from 0.1.0 to 0.1.1
