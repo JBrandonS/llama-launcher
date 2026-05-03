@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Dict, List, Any, Optional
 from .logger import get_logger
 from .exceptions import ConfigurationError
+from .constants import DEFAULT_MODEL_PATH, MODELS_DIR
 LOGGER = get_logger(__name__)
 
 
@@ -20,10 +21,10 @@ def _expand_path(value: Any) -> Path:
 
 class LlamaConfig(BaseModel):
     default_model_path: Path = Field(
-        default=Path(os.path.expanduser("~/.cache/llama-launcher/default_model.gguf"))
+        default=DEFAULT_MODEL_PATH
     )
     working_directory: Path = Field(
-        default=Path(os.path.expanduser("~/.cache/llama-launcher/models"))
+        default=MODELS_DIR
     )
     local_model_search_paths: List[Path] = Field(
         default_factory=lambda: [

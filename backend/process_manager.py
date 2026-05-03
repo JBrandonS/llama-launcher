@@ -13,8 +13,7 @@ try:
 except ImportError:
     psutil = None
 
-
-PID_DIR = Path.home() / '.cache' / 'llama-launcher' / 'pids'
+from backend.constants import PID_DIR
 
 
 class ProcessManager:

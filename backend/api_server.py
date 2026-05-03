@@ -23,6 +23,7 @@ from backend.config import LlamaConfig, load_config
 from backend.context import ServerContext
 from backend.llama_runner import LlamaRunner
 from backend.logger import get_logger
+from backend.constants import LOG_DIR
 from backend import daemon as daemon_module, gpu_detector
 
 logger = get_logger(__name__)
@@ -95,6 +96,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_get_daemon_service()
             elif path == "/daemon/service-file":
                 self._handle_get_daemon_service_file()
+            elif path == "/benchmark/results":
+                self._handle_get_benchmark_results()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -136,6 +139,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_post_daemon_stop()
             elif path == "/daemon/config":
                 self._handle_put_daemon_config()
+            elif path == "/benchmark/run":
+                self._handle_benchmark_run()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -149,6 +154,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_delete_server(path)
             elif path.startswith("/models/") and path.count("/") == 2:
                 self._handle_delete_model(path)
+            elif path == "/benchmark/clear":
+                self._handle_benchmark_clear()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -379,7 +386,7 @@ class APIHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_get_logs(self) -> None:
-        log_dir = Path.home() / ".cache" / "llama-launcher" / "logs"
+        log_dir = LOG_DIR
         limit = 200
         server_filter = None
         level_filter = None
@@ -746,7 +753,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def _handle_get_daemon_logs(self) -> None:
         """Get daemon logs."""
-        log_dir = Path.home() / ".cache" / "llama-launcher" / "logs"
+        log_dir = LOG_DIR
         limit = 200
         if "?" in self.path:
             qs = self.path.split("?", 1)[1]
@@ -830,7 +837,7 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         # Determine log file path for this server
-        log_dir = Path.home() / ".cache" / "llama-launcher" / "logs"
+        log_dir = LOG_DIR
         log_file = str(log_dir / f"server_{port}.log")
 
         try:

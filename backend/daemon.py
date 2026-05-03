@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Any
 
+from backend.constants import SERVICE_DIR
+
 class Daemon:
     """Lightweight daemon scaffold that runs a target in a background thread."""
 
@@ -68,8 +70,6 @@ def reload_daemon() -> None:
     global _global_daemon
     if _global_daemon:
         _global_daemon.reload()
-
-SERVICE_DIR = Path.home() / '.cache' / 'llama-launcher' / 'services'
 
 # Global state for daemon management
 _daemon_config = {
