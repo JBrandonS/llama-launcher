@@ -23,9 +23,14 @@ from backend.config import LlamaConfig, load_config
 from backend.context import ServerContext
 from backend.llama_runner import LlamaRunner
 from backend.logger import get_logger
+from backend.constants import LOG_DIR
 from backend import daemon as daemon_module, gpu_detector
 
 logger = get_logger(__name__)
+
+# ── Module-level benchmark result storage ────────────────────────────
+
+_benchmark_results: dict[str, dict] = {}
 
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -95,6 +100,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_get_daemon_service()
             elif path == "/daemon/service-file":
                 self._handle_get_daemon_service_file()
+            elif path == "/benchmark/results":
+                self._handle_get_benchmark_results()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -136,6 +143,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_post_daemon_stop()
             elif path == "/daemon/config":
                 self._handle_put_daemon_config()
+            elif path == "/benchmark/run":
+                self._handle_benchmark_run()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -149,6 +158,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_delete_server(path)
             elif path.startswith("/models/") and path.count("/") == 2:
                 self._handle_delete_model(path)
+            elif path == "/benchmark/clear":
+                self._handle_benchmark_clear()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -379,7 +390,7 @@ class APIHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_get_logs(self) -> None:
-        log_dir = Path.home() / ".cache" / "llama-launcher" / "logs"
+        log_dir = LOG_DIR
         limit = 200
         server_filter = None
         level_filter = None
@@ -746,7 +757,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def _handle_get_daemon_logs(self) -> None:
         """Get daemon logs."""
-        log_dir = Path.home() / ".cache" / "llama-launcher" / "logs"
+        log_dir = LOG_DIR
         limit = 200
         if "?" in self.path:
             qs = self.path.split("?", 1)[1]
@@ -830,7 +841,7 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         # Determine log file path for this server
-        log_dir = Path.home() / ".cache" / "llama-launcher" / "logs"
+        log_dir = LOG_DIR
         log_file = str(log_dir / f"server_{port}.log")
 
         try:
@@ -1203,6 +1214,98 @@ class APIHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.exception("run_model failed")
             self._send_json(500, {"error": str(e)})
+
+    # ── Benchmark handlers ────────────────────────────────────────────
+
+    def _handle_benchmark_run(self) -> None:
+        """Run a benchmark on the specified model and store results."""
+        body = self._read_body()
+        model_path = body.get("model", body.get("model_path", ""))
+        n_predict = int(body.get("n_predict", 128))
+        threads = int(body.get("threads", 8))
+        context_size = int(body.get("context_size", body.get("n_ctx", 2048)))
+        temperature = float(body.get("temperature", 0.7))
+
+        if not model_path:
+            self._send_json(400, {"error": "model is required"})
+            return
+
+        # Generate a unique job ID
+        import uuid
+        job_id = str(uuid.uuid4())[:8]
+
+        try:
+            # Build benchmark options dict for backend.benchmark.run_benchmark
+            benchmark_options = {
+                "n_predict": n_predict,
+                "threads": threads,
+                "n_ctx": context_size,
+                "temp": temperature,
+                "top_k": 40,
+                "top_p": 0.9,
+                "n_gpu_layers": -1,
+            }
+
+            # Use the existing benchmark module to run the benchmark
+            from backend.benchmark import run_benchmark
+
+            result = run_benchmark(
+                model_path=model_path,
+                prompt="The quick brown fox jumps over the lazy dog. ",
+                options=benchmark_options,
+                runner=None,
+            )
+
+            # Compute derived metrics for the frontend
+            metrics = result.get("metrics", {})
+            throughput = metrics.get("throughput_tokens_per_second", 0)
+            generated_tokens = result.get("generated_tokens", 0)
+            end_to_end_ms = metrics.get("end_to_end_latency_ms", 0)
+            time_per_token = (end_to_end_ms / generated_tokens * 1000) if generated_tokens and end_to_end_ms else 0
+
+            # Build the benchmark result record
+            benchmark_result = {
+                "id": job_id,
+                "modelName": Path(model_path).stem,
+                "modelPath": model_path,
+                "tokensPerSec": round(throughput, 2),
+                "timePerToken": round(time_per_token, 4),
+                "memoryUsed": metrics.get("memory_usage_mb", 0),
+                "memoryTotal": metrics.get("gpu_mem_alloc", 0),
+                "n_predict": n_predict,
+                "threads": threads,
+                "contextSize": context_size,
+                "temperature": temperature,
+                "status": result.get("mode", "synthetic"),
+                "errorMessage": None,
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "generated_tokens": generated_tokens,
+                "summary": result.get("summary", ""),
+            }
+
+            # Store in module-level dict
+            _benchmark_results[job_id] = benchmark_result
+
+            self._send_json(200, {
+                "jobId": job_id,
+                "status": "completed" if result.get("mode") == "real" else "synthetic",
+                "message": result.get("summary", "Benchmark completed"),
+            })
+        except Exception as e:
+            logger.exception("benchmark run failed for %s", model_path)
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_get_benchmark_results(self) -> None:
+        """Return all stored benchmark results sorted by timestamp descending."""
+        results = list(_benchmark_results.values())
+        # Sort by timestamp descending
+        results.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+        self._send_json(200, results)
+
+    def _handle_benchmark_clear(self) -> None:
+        """Clear all stored benchmark results."""
+        _benchmark_results.clear()
+        self._send_json(200, {"cleared": True})
 
 
 # ── Module-level server reference ──────────────────────────────────────

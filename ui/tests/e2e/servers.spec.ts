@@ -41,12 +41,12 @@ test.describe('ServersPage', () => {
     const headers = page.locator('table thead th');
     await expect(headers.first()).toBeVisible();
 
-    // Verify header text content
+    // Verify header text content (scoped to table to avoid sidebar collisions)
     await expect(page.getByText('Name')).toBeVisible();
     await expect(page.getByText('Status')).toBeVisible();
     await expect(page.getByText('Port')).toBeVisible();
-    await expect(page.getByText('Model')).toBeVisible();
-    await expect(page.getByText('GPU')).toBeVisible();
+    await expect(table.getByText('Model')).toBeVisible();
+    await expect(table.getByText('GPU')).toBeVisible();
   });
 
   /* ── 3. Server rows display (handles empty list) ────────────── */

@@ -1,4 +1,4 @@
-import type { ModelInfo } from '@services/types';
+import type { ModelInfo, ServerInfo } from '@services/types';
 import React from 'react';
 import {
   Pencil,
@@ -8,6 +8,7 @@ import {
   Bookmark,
   File,
   Clock,
+  Radio,
 } from 'lucide-react';
 import { cn } from '@utils/cn';
 
@@ -16,6 +17,7 @@ interface ModelCardProps {
   onClick: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  runningServer?: ServerInfo;
 }
 
 const typeIcons: Record<string, typeof File> = {
@@ -30,9 +32,11 @@ const typeColors: Record<string, string> = {
   template: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
 };
 
-export function ModelCard({ model, onClick, onEdit, onDelete }: ModelCardProps) {
+export function ModelCard({ model, onClick, onEdit, onDelete, runningServer }: ModelCardProps) {
   const typeIcon = typeIcons[model.type || 'local'] || File;
   const typeColor = typeColors[model.type || 'local'] || typeColors.local;
+
+  const isRunning = !!runningServer;
 
   const formatSize = (bytes: number) => {
     if (bytes === 0) return '0 B';
@@ -73,27 +77,38 @@ export function ModelCard({ model, onClick, onEdit, onDelete }: ModelCardProps) 
           {React.createElement(typeIcon, { className: 'h-3 w-3' })}
           {model.type || 'local'}
         </span>
-        <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit();
-            }}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            title="Edit model"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-            title="Remove model"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+        <div className="flex items-center gap-1">
+          {isRunning && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400"
+              title={`Running on server port ${runningServer?.port}`}
+            >
+              <Radio className="h-3 w-3 animate-pulse" />
+              Running
+            </span>
+          )}
+          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title="Edit model"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              title="Remove model"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 

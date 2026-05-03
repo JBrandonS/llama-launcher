@@ -194,6 +194,10 @@ def main() -> None:
     # Auto-build UI if needed
     _ensure_built()
 
+    # Ensure cache directories exist
+    from backend.constants import ensure_directories
+    ensure_directories()
+
     ui_url = build_url(args.host, args.port)
     api_url = build_url(args.host, args.api_port)
 

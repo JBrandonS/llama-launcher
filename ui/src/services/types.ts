@@ -254,3 +254,43 @@ export interface ServerConfig {
   args?: Record<string, unknown>;
   env?: Record<string, string>;
 }
+
+// ─── Benchmark Types ──────────────────────────────────────────────
+export interface BenchmarkConfig {
+  model: string;
+  n_predict: number;
+  threads: number;
+  context_size: number;
+  temperature: number;
+}
+
+export interface BenchmarkResult {
+  id: string;
+  modelName: string;
+  modelPath?: string;
+  tokensPerSec: number;
+  timePerToken: number;
+  memoryUsed?: number;
+  memoryTotal?: number;
+  n_predict: number;
+  threads: number;
+  contextSize: number;
+  temperature: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  errorMessage?: string;
+  timestamp: string;
+}
+
+export interface BenchmarkRunRequest {
+  model: string;
+  n_predict?: number;
+  threads?: number;
+  context_size?: number;
+  temperature?: number;
+}
+
+export interface BenchmarkRunResponse {
+  jobId: string;
+  status: string;
+  message: string;
+}

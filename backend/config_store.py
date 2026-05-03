@@ -4,8 +4,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-
-CONFIGS_DIR = Path.home() / '.cache' / 'llama-launcher' / 'configs'
+from backend.constants import CONFIGS_DIR
 
 
 class ConfigItem:
