@@ -41,6 +41,7 @@ export interface TemplateArgs {
   reasoning_budget?: number;
   kv_unified?: boolean;
   no_mmap?: boolean;
+  numa?: string | boolean;
   flash_attention?: boolean;
   no_webui?: boolean;
   sleep_idle_seconds?: number;
@@ -173,12 +174,33 @@ function saveLastUsed(modelPath: string, templateId: string): void {
 // ── INI conversion helpers ───────────────────────────────────────
 
 const SECTION_MAP: Array<[string, string]> = [
+  // Server
   ['port', 'server.port'],
   ['host', 'server.host'],
+  ['cors', 'server.cors'],
+  ['cors_allow_origin', 'server.cors-allow-origin'],
+  ['api_key', 'server.api-key'],
+  // Model
   ['gpu_layers', 'model.gpu-layers'],
   ['context_size', 'model.ctx-size'],
   ['threads', 'model.threads'],
   ['embedding', 'model.embedding'],
+  ['seed', 'model.seed'],
+  ['n_predict', 'model.n-predict'],
+  ['num_keep', 'model.num-keep'],
+  ['rope_freq_scale', 'model.rope-freq-scale'],
+  ['no_mmap', 'model.no-mmap'],
+  ['numa', 'model.numa'],
+  ['flash_attention', 'model.flash-attn'],
+  ['jinja', 'model.jinja'],
+  ['reasoning', 'model.reasoning'],
+  ['reasoning_budget', 'model.reasoning-budget'],
+  ['kv_unified', 'model.kv-unified'],
+  ['mlock', 'model.mlock'],
+  ['rope_scaling', 'model.rope-scaling'],
+  ['rope_freq_base', 'model.rope-freq-base'],
+  ['logits_all', 'model.logits-all'],
+  // Sampling
   ['temp', 'sampling.temp'],
   ['top_k', 'sampling.top-k'],
   ['top_p', 'sampling.top-p'],
@@ -191,18 +213,18 @@ const SECTION_MAP: Array<[string, string]> = [
   ['mirostat', 'sampling.mirostat'],
   ['mirostat_tau', 'sampling.mirostat-tau'],
   ['mirostat_eta', 'sampling.mirostat-eta'],
-  ['seed', 'model.seed'],
-  ['n_predict', 'model.n-predict'],
-  ['num_keep', 'sampling.num-keep'],
-  ['rope_freq_scale', 'model.rope-freq-scale'],
+  // Performance
   ['batch_size', 'performance.batch-size'],
   ['cache_reuse', 'performance.cache-reuse'],
-  ['no_mmap', 'model.no-mmap'],
-  ['flash_attention', 'model.flash-attn'],
-  ['jinja', 'model.jinja'],
-  ['reasoning', 'model.reasoning'],
-  ['reasoning_budget', 'model.reasoning-budget'],
-  ['kv_unified', 'model.kv-unified'],
+  ['cont_batching', 'performance.cont-batching'],
+  // Speculative / Cache
+  ['speculative', 'model.speculative'],
+  ['draft_model', 'model.draft-model'],
+  ['prompt_cache', 'model.prompt-cache'],
+  ['keep_live', 'model.keep-live'],
+  // Legacy / extra
+  ['penalty_range', 'sampling.penalty-range'],
+  ['grammar_file', 'model.grammar-file'],
 ].map(([key, section]) => [key, section] as const);
 
 function toIniSections(args: TemplateArgs, modelPath: string): Record<string, Record<string, string>> {
@@ -299,9 +321,24 @@ function toTemplateArgs(sections: Record<string, Record<string, string>>): Templ
   return args;
 }
 
+// ── INI save/load for current form state ─────────────────────────
+
+/** Convert current form state + model path to llama.cpp-style INI string */
+export function saveTemplateAsIni(args: TemplateArgs, modelPath: string): string {
+  const sections = toIniSections(args, modelPath);
+  return toIniString(sections);
+}
+
+/** Parse an INI string back into TemplateArgs (no model id/name from filename) */
+export function loadTemplateFromIni(iniContent: string): { args: TemplateArgs; modelPath: string } {
+  const sections = fromIniString(iniContent);
+  const args = toTemplateArgs(sections);
+  const modelPath = sections.model?.path ?? '';
+  return { args, modelPath };
+}
+
 export async function saveTemplateToFile(template: Template, modelPath: string): Promise<void> {
-  const sections = toIniSections(template.args, modelPath);
-  const iniContent = toIniString(sections);
+  const iniContent = saveTemplateAsIni(template.args, modelPath);
 
   // Try File System Access API first
   if ('showSaveFilePicker' in window) {
@@ -335,12 +372,11 @@ export async function loadTemplateFromFile(file: File): Promise<Template> {
   const ext = file.name.split('.').pop()?.toLowerCase();
 
   if (ext === 'ini' || ext === 'txt') {
-    const sections = fromIniString(text);
-    const args = toTemplateArgs(sections);
+    const { args, modelPath } = loadTemplateFromIni(text);
     return {
       id: file.name.replace(/\.ini$/, '').replace(/\.txt$/, ''),
       name: file.name,
-      model: sections.model?.path ?? '',
+      model: modelPath,
       source: 'file' as const,
       args,
     };
