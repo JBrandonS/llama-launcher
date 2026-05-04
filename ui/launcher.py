@@ -44,7 +44,7 @@ ASSETS_DIR = _PROJECT_ROOT / "ui" / "dist"
 DEFAULT_MIME = "text/plain"
 
 
-def _ensure_built() -> None:
+def _ensure_built(dev_mode: bool = False) -> None:
     """Ensure the UI is built. Build if dist/index.html is missing or source is newer."""
     index_path = ASSETS_DIR / "index.html"
 
@@ -80,16 +80,20 @@ def _ensure_built() -> None:
             pass
 
     if needs_build:
-        print("Building UI...", flush=True)
+        print("Building UI..." + (" (dev)" if dev_mode else ""), flush=True)
         try:
+            env = os.environ.copy()
+            if dev_mode:
+                env["VITE_DEV"] = "true"
             subprocess.run(
                 ["npm", "run", "build"],
                 cwd=str(_PROJECT_ROOT / "ui"),
                 check=True,
                 capture_output=True,
                 text=True,
+                env=env,
             )
-            print("UI built successfully.", flush=True)
+            print("UI built successfully." + (" (dev)" if dev_mode else ""), flush=True)
         except subprocess.CalledProcessError as e:
             print(f"npm build failed: {e.stderr}", file=sys.stderr)
             print("Run 'cd ui && npm run build' manually.", file=sys.stderr)
@@ -146,7 +150,7 @@ def build_url(host: str, port: int) -> str:
     return f"http://{base}:{port}"
 
 
-def start_api_server(host: str, port: int):
+def start_api_server(host: str, port: int, debug: bool = False):
     """Start the backend API server in a background thread."""
     import sys as _sys
     if str(_PROJECT_ROOT) not in _sys.path:
@@ -154,7 +158,7 @@ def start_api_server(host: str, port: int):
 
     try:
         from backend.api_server import api_server as _api_server_fn
-        srv = _api_server_fn(host, port)
+        srv = _api_server_fn(host, port, debug=debug)
         srv.serve_forever()
     except Exception as e:
         print(f"[launcher] Warning: Could not start API server: {e}", file=sys.stderr)
@@ -189,10 +193,17 @@ def main() -> None:
         default=0,
         help="Auto-close window after N seconds (default: 0 = never)",
     )
+    parser.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG-level logging to stderr"
+    )
+    parser.add_argument(
+        "--dev", action="store_true",
+        help="Development mode: build without minification for readable error stacks",
+    )
     args = parser.parse_args()
 
     # Auto-build UI if needed
-    _ensure_built()
+    _ensure_built(dev_mode=args.dev)
 
     # Ensure cache directories exist
     from backend.constants import ensure_directories
@@ -203,7 +214,7 @@ def main() -> None:
 
     api_server_thread = threading.Thread(
         target=start_api_server,
-        args=(args.host, args.api_port),
+        args=(args.host, args.api_port, args.debug),
         daemon=True,
     )
     api_server_thread.start()

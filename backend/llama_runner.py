@@ -187,8 +187,18 @@ class LlamaRunner:
     @staticmethod
     def get_command_preview(model_path: str, options: Dict[str, Any]) -> str:
         """Generate a CLI command string for preview (without defaults)."""
+        # PreviewConfig must have attribute names matching _ATTR_MAP keys in generate_command
+        preview_attrs = {
+            'n_ctx': DEFAULT_ARGS.get('context_size', 0),
+            'n_gpu_layers': DEFAULT_ARGS.get('gpu_layers', -1),
+            'temperature': DEFAULT_ARGS.get('temp', 0.8),
+            'threads': DEFAULT_ARGS.get('threads', 0),
+            'top_k': DEFAULT_ARGS.get('top_k', 40),
+            'top_p': DEFAULT_ARGS.get('top_p', 0.95),
+            'n_predict': DEFAULT_ARGS.get('n_predict', 256),
+        }
         runner = LlamaRunner.__new__(LlamaRunner)
-        runner.config = type('PreviewConfig', (), {attr: DEFAULT_ARGS.get(attr, 0) for attr in DEFAULT_ARGS})()
+        runner.config = type('PreviewConfig', (), preview_attrs)()
         runner.llama_cli = runner._find_llama_executable()
         # Merge defaults with provided options
         merged = {**DEFAULT_ARGS, **options}

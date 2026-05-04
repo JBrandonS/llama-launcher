@@ -1,7 +1,6 @@
 import { Suspense, lazy, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { cn } from '@utils/cn';
 import { ErrorBoundary } from '@components/common/ErrorBoundary';
 import { Sidebar } from '@components/common/Sidebar';
 import { NotFoundPage } from '@components/common/NotFoundPage';
@@ -41,11 +40,8 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
-      <div className={cn(
-        'flex flex-1 flex-col overflow-hidden transition-all duration-200',
-        sidebarCollapsed ? 'ml-16' : 'ml-56'
-      )}>
-         <main className={cn('mx-auto flex max-w-6xl flex-1 overflow-y-auto p-4 md:p-6')}>
+      <div className="flex flex-1 flex-col overflow-hidden">
+         <main className="flex flex-1 flex-col overflow-y-auto p-4 md:p-6">
           <Suspense fallback={loading}>
             <Routes>
               <Route index element={

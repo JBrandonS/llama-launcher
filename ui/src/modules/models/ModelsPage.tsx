@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Search, Filter, Loader2, Database, FolderOpen, Radio } from 'lucide-react';
 import { cn } from '@utils/cn';
@@ -21,6 +21,7 @@ interface ModelWithSize extends ModelInfo {
 
 export function ModelsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDirection>('asc');
@@ -117,6 +118,7 @@ export function ModelsPage() {
     try {
       await apiService.deleteModel(deletingModel.id);
       toast.success(`Model "${deletingModel.id}" removed`);
+      queryClient.invalidateQueries({ queryKey: ['models/types'] });
       setDeletingModel(null);
     } catch {
       toast.error('Failed to remove model');
@@ -333,6 +335,7 @@ export function ModelsPage() {
           onClose={() => setEditingModel(null)}
           onSuccess={() => {
             toast.success(`Model "${editingModel.id}" updated`);
+            queryClient.invalidateQueries({ queryKey: ['models/types'] });
             setEditingModel(null);
           }}
         />

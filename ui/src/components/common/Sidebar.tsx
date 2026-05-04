@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@utils/cn';
 import {
@@ -38,7 +38,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
 
-  if (open && location.key) setOpen(false);
+  // Close mobile sidebar on navigation (must be in useEffect, not render)
+  useEffect(() => {
+    if (open) setOpen(false);
+  }, [location.key]);
 
   const showLabels = !collapsed;
 

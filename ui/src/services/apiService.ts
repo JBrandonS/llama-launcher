@@ -23,6 +23,47 @@ import type {
   ValidationError,
 } from './types';
 
+// ─── Multi-benchmark types (local to apiService) ──────────────────
+
+export interface BenchmarkTypeInfo {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface SavedBenchmarkSummary {
+  file: string;
+  name: string;
+  timestamp: string;
+  model_path: string;
+  benchmarks: Record<string, number>;
+}
+
+export interface BenchmarkAggregate {
+  label: string;
+  score: number;
+  unit: string;
+  higher_is_better: boolean;
+  tasks_run: number;
+  correct?: number;
+  task_results: Array<Record<string, unknown>>;
+}
+
+export interface FullBenchmarkReport {
+  model_path: string;
+  timestamp: string;
+  benchmarks: Record<string, BenchmarkAggregate>;
+}
+
+export interface MultiBenchmarkResponse {
+  jobId: string;
+  status: string;
+  message: string;
+  resultFile: string;
+  models: string[];
+  benchmarks: string[];
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8501';
 
 async function request<T>(
@@ -84,6 +125,14 @@ export const apiService = {
       body: JSON.stringify({ model: modelPath, args }),
     });
     return res.ok ? (res.data as { command: string }) : { command: '' };
+  },
+
+  async getLaunchIni(modelPath: string, args: Record<string, unknown>): Promise<{ ini: string }> {
+    const res = await request<{ ini: string }>('/launch/preview-ini', {
+      method: 'POST',
+      body: JSON.stringify({ model: modelPath, args }),
+    });
+    return res.ok ? (res.data as { ini: string }) : { ini: '' };
   },
 
   async stopServer(id: string): Promise<boolean> {
@@ -206,6 +255,35 @@ export const apiService = {
     return res.ok ? (res.data as LogStreamResponse) : { entries: [], hasMore: false };
   },
 
+  // ── Systemd ─────────────────────────────────────────────────
+  async getDaemonSystemdStatus(): Promise<{
+    exists: boolean;
+    active: boolean;
+    sub: string;
+    pid: number | null;
+    error: string | null;
+  } | null> {
+    const res = await request<{
+      exists: boolean;
+      active: boolean;
+      sub: string;
+      pid: number | null;
+      error: string | null;
+    }>('/daemon/systemd-status');
+    return res.ok ? (res.data as {
+      exists: boolean;
+      active: boolean;
+      sub: string;
+      pid: number | null;
+      error: string | null;
+    }) : null;
+  },
+
+  async getDaemonSystemdUnit(): Promise<{ content: string; path: string; exists: boolean } | null> {
+    const res = await request<{ content: string; path: string; exists: boolean }>('/daemon/systemd-unit');
+    return res.ok ? (res.data as { content: string; path: string; exists: boolean }) : null;
+  },
+
   // ── Logs ────────────────────────────────────────────────────
   async getLogs(
     serverId?: string,
@@ -294,6 +372,63 @@ export const apiService = {
 
   async clearBenchmarkResults(): Promise<boolean> {
     const res = await request('/benchmark/clear', { method: 'DELETE' });
+    return res.ok;
+  },
+
+  async loadBenchmarkIni(file: File): Promise<{ ok: boolean; config?: Record<string, number>; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/benchmark/ini`, {
+        method: 'POST',
+        body: file,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `HTTP ${res.status}` };
+      }
+      return { ok: true, config: (data as { config: Record<string, number> }).config };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Network error';
+      return { ok: false, error: `Failed to load INI file: ${message}` };
+    }
+  },
+
+  // ── Multi-benchmark API (benchmark_tasks.py integration) ─────────
+
+  /** Fetch available benchmark types from the backend. */
+  async getBenchmarkTypes(): Promise<BenchmarkTypeInfo[]> {
+    const res = await request<BenchmarkTypeInfo[]>('/benchmark/types');
+    return res.ok ? (res.data as BenchmarkTypeInfo[]) : [];
+  },
+
+  /** Run benchmarks on multiple models and benchmark types. */
+  async benchmarkMultiRun(config: {
+    model_paths: string[];
+    benchmark_ids: string[];
+    n_tasks_per_benchmark?: number;
+    threads?: number;
+  }): Promise<MultiBenchmarkResponse> {
+    const res = await request<MultiBenchmarkResponse>('/benchmark/multi-run', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+    return res.ok ? (res.data as MultiBenchmarkResponse) : {} as unknown as MultiBenchmarkResponse;
+  },
+
+  /** Load saved benchmark result summaries (new format). */
+  async getSavedBenchmarkResults(): Promise<SavedBenchmarkSummary[]> {
+    const res = await request<SavedBenchmarkSummary[]>('/saved-benchmark-results');
+    return res.ok ? (res.data as SavedBenchmarkSummary[]) : [];
+  },
+
+  /** Load a full benchmark report by name. */
+  async getFullBenchmarkResult(name: string): Promise<FullBenchmarkReport | null> {
+    const res = await request<FullBenchmarkReport>(`/saved-benchmark-result/${encodeURIComponent(name)}`);
+    return res.ok ? (res.data as FullBenchmarkReport) : null;
+  },
+
+  /** Clear all saved benchmark results. */
+  async clearSavedBenchmarkResults(): Promise<boolean> {
+    const res = await request('/saved-benchmark-clear', { method: 'DELETE' });
     return res.ok;
   },
 };

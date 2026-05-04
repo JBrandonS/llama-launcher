@@ -7,9 +7,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const src = resolve(__dirname, 'src');
+const isDev = process.env.VITE_DEV === 'true';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    minify: !isDev,
+    sourcemap: isDev,
+  },
   resolve: {
     alias: {
       '@': src,

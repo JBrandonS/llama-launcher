@@ -40,7 +40,9 @@ def write_server_ini(
         f"rope-scaling = {rope_scaling}",
     ]
 
+    # Pass through any extra fields as key = value lines
     for key, value in extra.items():
-        lines.append(f"{key} = {value}")
+        if value is not None and str(value).strip():
+            lines.append(f"{key} = {value}")
 
     return "\n".join(lines) + "\n"

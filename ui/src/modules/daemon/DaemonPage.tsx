@@ -20,6 +20,8 @@ import {
   Terminal,
   AlertTriangle,
   CheckCircle,
+  Shield,
+  Circle,
 } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { formatTimestamp, escapeHtml, formatUptime } from '@utils/format';
@@ -76,6 +78,21 @@ export function DaemonPage() {
     queryKey: ['daemon-service-file'],
     queryFn: () => apiService.getDaemonServiceFile(),
     enabled: daemon?.status === 'running',
+    staleTime: 30_000,
+  });
+
+  // Systemd service check
+  const { data: systemdStatus, isLoading: systemdStatusLoading } = useQuery({
+    queryKey: ['daemon-systemd-status'],
+    queryFn: () => apiService.getDaemonSystemdStatus(),
+    staleTime: 15_000,
+  });
+
+  const [showSystemdUnit, setShowSystemdUnit] = useState(false);
+  const { data: systemdUnitData, isLoading: systemdUnitLoading } = useQuery({
+    queryKey: ['daemon-systemd-unit'],
+    queryFn: () => apiService.getDaemonSystemdUnit(),
+    enabled: showSystemdUnit,
     staleTime: 30_000,
   });
 
@@ -353,6 +370,90 @@ export function DaemonPage() {
                   />
                 </div>
               </div>
+            </div>
+          )}
+
+          {daemon?.status === 'running' && (
+            <div className="rounded-lg border bg-card shadow-sm">
+              <button
+                type="button"
+                onClick={() => setShowSystemdUnit((v) => !v)}
+                className="flex w-full items-center justify-between border-b bg-muted/30 px-4 py-3 text-left"
+              >
+                <h3 className="flex items-center gap-2 font-medium">
+                  <Shield className="h-4 w-4" />
+                  Systemd Service
+                </h3>
+                {showSystemdUnit ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+
+              {showSystemdUnit && (
+                <div className="p-4 space-y-3">
+                  {/* Status summary */}
+                  <div className="flex flex-wrap items-center gap-3 text-sm">
+                    {systemdStatusLoading ? (
+                      <span className="flex items-center gap-2 text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Checking systemd…
+                      </span>
+                    ) : systemdStatus?.exists ? (
+                      <>
+                        <Badge
+                          variant={systemdStatus.active ? 'success' : 'neutral'}
+                        >
+                          {systemdStatus.active ? 'active' : systemdStatus.sub || 'inactive'}
+                        </Badge>
+                        {systemdStatus.pid != null && (
+                          <span className="text-muted-foreground">
+                            PID: {systemdStatus.pid}
+                          </span>
+                        )}
+                        {systemdStatus.error && (
+                          <span className="flex items-center gap-1 text-destructive/80">
+                            <AlertTriangle className="h-3 w-3" />
+                            {systemdStatus.error}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="flex items-center gap-2 text-muted-foreground">
+                        <Circle className="h-4 w-4" />
+                        No systemd service found for llama-launcher.service
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Unit file content */}
+                  {systemdUnitData?.exists && systemdUnitData.content && (
+                    <div className="relative">
+                      {systemdUnitData.path && (
+                        <p className="mb-1 text-xs text-muted-foreground">
+                          Path: {systemdUnitData.path}
+                        </p>
+                      )}
+                      <pre className="max-h-80 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
+                        {systemdUnitData.content}
+                      </pre>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(systemdUnitData.content);
+                          toast.success('Copied to clipboard');
+                        }}
+                        className="absolute right-2 top-2 rounded-md border bg-background/80 p-1.5 text-muted-foreground hover:bg-background"
+                      >
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+
+                  {systemdStatus?.exists && !systemdUnitData?.exists && !systemdUnitLoading && (
+                    <p className="py-2 text-center text-sm text-muted-foreground">
+                      Service exists but unit file content is not available
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

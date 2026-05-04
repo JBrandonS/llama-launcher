@@ -13,18 +13,30 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import uuid
+
 from backend.config import LlamaConfig, load_config
 from backend.context import ServerContext
 from backend.llama_runner import LlamaRunner
-from backend.logger import get_logger
+from backend.logger import get_logger, setup_logger
 from backend.constants import LOG_DIR
 from backend import daemon as daemon_module, gpu_detector
+from backend.benchmark_tasks import (
+    BENCHMARK_TYPES,
+    get_available_benchmarks,
+    load_benchmark_result,
+    load_benchmark_results,
+    run_multi_model_benchmark,
+    save_benchmark_result,
+)
+from backend.sleep_inhibitor import SleepInhibitor
 
 logger = get_logger(__name__)
 
@@ -100,6 +112,20 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_get_daemon_service()
             elif path == "/daemon/service-file":
                 self._handle_get_daemon_service_file()
+            elif path == "/daemon/systemd-status":
+                self._handle_get_daemon_systemd_status()
+            elif path == "/daemon/systemd-unit":
+                self._handle_get_daemon_systemd_unit()
+            elif path == "/api/benchmarks/types":
+                self._handle_get_benchmark_types()
+            elif path == "/api/benchmark/results":
+                self._handle_get_new_benchmark_results()
+            elif path == "/saved-benchmark-results":
+                self._handle_get_new_benchmark_results()
+            elif path.startswith("/api/benchmark/result/"):
+                self._handle_get_benchmark_result_by_name(path)
+            elif path.startswith("/saved-benchmark-result/"):
+                self._handle_get_benchmark_result_by_name(path)
             elif path == "/benchmark/results":
                 self._handle_get_benchmark_results()
             else:
@@ -143,8 +169,12 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_post_daemon_stop()
             elif path == "/daemon/config":
                 self._handle_put_daemon_config()
+            elif path == "/api/benchmark/multi-run":
+                self._handle_post_benchmark_multi_run()
             elif path == "/benchmark/run":
                 self._handle_benchmark_run()
+            elif path == "/benchmark/ini":
+                self._handle_post_benchmark_ini()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -158,6 +188,10 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_delete_server(path)
             elif path.startswith("/models/") and path.count("/") == 2:
                 self._handle_delete_model(path)
+            elif path == "/api/benchmark/clear":
+                self._handle_delete_benchmark_clear()
+            elif path == "/saved-benchmark-clear":
+                self._handle_delete_benchmark_clear()
             elif path == "/benchmark/clear":
                 self._handle_benchmark_clear()
             else:
@@ -817,6 +851,80 @@ class APIHandler(BaseHTTPRequestHandler):
         content = svc_path_obj.read_text() if svc_path_obj.exists() else ""
         self._send_json(200, {"content": content})
 
+    def _handle_get_daemon_systemd_status(self) -> None:
+        """Check the actual systemd service status for llama-launcher.service."""
+        result = {
+            "exists": False,
+            "active": False,
+            "sub": "",
+            "pid": None,
+            "error": None,
+        }
+        try:
+            proc = subprocess.run(
+                ["systemctl", "is-active", "llama-launcher.service"],
+                capture_output=True, text=True, timeout=10,
+            )
+            active = proc.stdout.strip()
+            result["exists"] = True
+            result["active"] = (active == "active")
+            result["sub"] = active
+
+            if result["active"]:
+                # Try to get the PID
+                try:
+                    pid_proc = subprocess.run(
+                        ["systemctl", "show", "-p", "MainPID", "--value",
+                         "llama-launcher.service"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    main_pid = pid_proc.stdout.strip()
+                    if main_pid and main_pid != "0":
+                        result["pid"] = int(main_pid)
+                except Exception:
+                    pass
+        except FileNotFoundError:
+            result["error"] = "systemctl not found (not on a systemd system)"
+        except subprocess.TimeoutExpired:
+            result["error"] = "systemctl timed out"
+        except Exception as e:
+            result["error"] = str(e)
+
+        self._send_json(200, result)
+
+    def _handle_get_daemon_systemd_unit(self) -> None:
+        """Read the systemd unit file content for llama-launcher.service."""
+        result = {"content": "", "path": "", "exists": False}
+        # Check common systemd unit locations
+        candidates = [
+            Path("/etc/systemd/system/llama-launcher.service"),
+            Path("/usr/lib/systemd/system/llama-launcher.service"),
+            Path("/lib/systemd/system/llama-launcher.service"),
+        ]
+        for svc_path in candidates:
+            if svc_path.exists():
+                result["content"] = svc_path.read_text()
+                result["path"] = str(svc_path)
+                result["exists"] = True
+                self._send_json(200, result)
+                return
+
+        # Also check via systemctl cat as fallback
+        try:
+            proc = subprocess.run(
+                ["systemctl", "cat", "llama-launcher.service"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                result["content"] = proc.stdout.strip()
+                result["exists"] = True
+                self._send_json(200, result)
+                return
+        except Exception:
+            pass
+
+        self._send_json(200, result)
+
     # ── POST handlers ───────────────────────────────────────────────
 
     def _handle_post_server(self) -> None:
@@ -894,6 +1002,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
         try:
             from backend.ini_writer import write_server_ini
+            # Pass all form fields as extra args for comprehensive INI output
             ini = write_server_ini(
                 model_path=model_path,
                 host=args.get("host", "127.0.0.1"),
@@ -907,6 +1016,11 @@ class APIHandler(BaseHTTPRequestHandler):
                 n_predict=int(args.get("n_predict", 512)),
                 embedding=bool(args.get("embedding", False)),
                 rope_scaling=args.get("rope_scaling", "none"),
+                **{k: v for k, v in args.items() if k not in (
+                    "host", "port", "context_size", "gpu_layers", "threads",
+                    "temperature", "top_k", "top_p", "n_predict", "embedding",
+                    "rope_scaling",
+                )},
             )
             self._send_json(200, {"ini": ini})
         except Exception as e:
@@ -1215,10 +1329,152 @@ class APIHandler(BaseHTTPRequestHandler):
             logger.exception("run_model failed")
             self._send_json(500, {"error": str(e)})
 
-    # ── Benchmark handlers ────────────────────────────────────────────
+    # ── Benchmark handlers (new API) ────────────────────────────────────
+
+    def _handle_get_benchmark_types(self) -> None:
+        """Return list of available benchmark types from benchmark_tasks."""
+        types = get_available_benchmarks()
+        self._send_json(200, types)
+
+    def _handle_post_benchmark_multi_run(self) -> None:
+        """Run benchmarks on one or more models via benchmark_tasks module.
+
+        Accepts JSON body with:
+            model_paths: list of .gguf model paths
+            benchmark_ids: list of benchmark type IDs (throughput, mmlu, etc.)
+            n_tasks_per_benchmark: number of tasks per benchmark (default 3)
+            threads: number of threads (default 8)
+        """
+        body = self._read_body()
+
+        model_paths = body.get("model_paths", [])
+        benchmark_ids = body.get("benchmark_ids", [])
+        n_tasks = int(body.get("n_tasks_per_benchmark", 3))
+        threads = int(body.get("threads", 8))
+
+        # Validate inputs
+        if not model_paths:
+            self._send_json(400, {"error": "model_paths is required"})
+            return
+        if not benchmark_ids:
+            self._send_json(400, {"error": "benchmark_ids is required"})
+            return
+
+        # Validate each model path exists and ends with .gguf
+        for mp in model_paths:
+            p = Path(mp)
+            if not p.exists():
+                self._send_json(400, {"error": f"Model file not found: {mp}"})
+                return
+            if not str(mp).endswith(".gguf"):
+                self._send_json(400, {"error": f"Model must be a .gguf file: {mp}"})
+                return
+
+        # Validate benchmark IDs
+        for bid in benchmark_ids:
+            if bid not in BENCHMARK_TYPES:
+                self._send_json(400, {"error": f"Unknown benchmark type: {bid}. Available: {list(BENCHMARK_TYPES.keys())}"})
+                return
+
+        # Generate a unique job ID
+        job_id = str(uuid.uuid4())[:8]
+
+        try:
+            # Acquire sleep inhibition before starting benchmarks
+            inhibitor = SleepInhibitor(
+                reason=f"Benchmarking {', '.join(model_paths)}",
+                who="llama-launcher"
+            )
+            inhibitor.acquire()
+
+            try:
+                # Run the multi-model benchmark
+                report = run_multi_model_benchmark(
+                    model_paths=model_paths,
+                    benchmark_ids=benchmark_ids,
+                    n_tasks_per_benchmark=n_tasks,
+                )
+
+                # Save the result to disk
+                name = f"multi_{job_id}"
+                filepath = save_benchmark_result(report, name)
+
+                self._send_json(200, {
+                    "jobId": job_id,
+                    "status": "completed",
+                    "message": f"Benchmark completed on {len(model_paths)} model(s)",
+                    "resultFile": filepath,
+                    "models": list(report.get("results", {}).keys()),
+                    "benchmarks": benchmark_ids,
+                })
+            finally:
+                # Always release the inhibitor
+                inhibitor.release()
+
+        except Exception as e:
+            logger.exception("multi-run benchmark failed")
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_get_new_benchmark_results(self) -> None:
+        """Return list of saved benchmark result summaries from benchmark_tasks."""
+        try:
+            results = load_benchmark_results()
+            self._send_json(200, results)
+        except Exception as e:
+            logger.exception("failed to load benchmark results")
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_get_benchmark_result_by_name(self, path: str) -> None:
+        """Return full benchmark result by name from benchmark_tasks."""
+        # Extract name from path: /api/benchmark/result/<name>
+        parts = path.strip("/").split("/")
+        if len(parts) != 3 or parts[2] == "":
+            self._send_json(400, {"error": "Benchmark result name is required"})
+            return
+        name = parts[2]
+
+        # Build the file path
+        results_dir = Path.home() / ".cache" / "llama-launcher" / "benchmark_results"
+        filepath = str(results_dir / f"{name}.json")
+
+        try:
+            result = load_benchmark_result(filepath)
+            self._send_json(200, result)
+        except FileNotFoundError:
+            # Try loading by name directly if it looks like a full path
+            if "/" in name or "\\" in name:
+                try:
+                    result = load_benchmark_result(name)
+                    self._send_json(200, result)
+                    return
+                except FileNotFoundError:
+                    pass
+            self._send_json(404, {"error": f"Benchmark result not found: {name}"})
+        except Exception as e:
+            logger.exception("failed to load benchmark result %s", name)
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_delete_benchmark_clear(self) -> None:
+        """Clear all saved benchmark results from benchmark_tasks storage."""
+        import glob as glob_mod
+        try:
+            results_dir = Path.home() / ".cache" / "llama-launcher" / "benchmark_results"
+            results_dir.mkdir(parents=True, exist_ok=True)
+            json_files = list(results_dir.glob("*.json"))
+            for f in json_files:
+                f.unlink()
+            self._send_json(200, {"cleared": True, "count": len(json_files)})
+        except Exception as e:
+            logger.exception("failed to clear benchmark results")
+            self._send_json(500, {"error": str(e)})
+
+    # ── Benchmark handlers (legacy/deprecated) ─────────────────────────
 
     def _handle_benchmark_run(self) -> None:
-        """Run a benchmark on the specified model and store results."""
+        """Run a benchmark on the specified model and store results.
+
+        DEPRECATED: Use POST /api/benchmark/multi-run instead.
+        """
         body = self._read_body()
         model_path = body.get("model", body.get("model_path", ""))
         n_predict = int(body.get("n_predict", 128))
@@ -1307,13 +1563,76 @@ class APIHandler(BaseHTTPRequestHandler):
         _benchmark_results.clear()
         self._send_json(200, {"cleared": True})
 
+    def _handle_post_benchmark_ini(self) -> None:
+        """Parse an uploaded INI file and return extracted benchmark parameters."""
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self._send_json(400, {"error": "No file uploaded"})
+            return
+
+        body = self.rfile.read(content_length)
+        ini_text = body.decode("utf-8", errors="replace")
+
+        # Minimal INI parser (same format as templateLoader.ts SECTION_MAP)
+        import configparser
+        config = configparser.ConfigParser()
+        config.optionxform = str  # preserve case
+        try:
+            config.read_string(ini_text)
+        except Exception as e:
+            self._send_json(400, {"error": f"Invalid INI file: {e}"})
+            return
+
+        extracted: dict[str, Any] = {}
+
+        def _int_or_default(section: str, key: str, default: int) -> int:
+            try:
+                return int(config.get(section, key, fallback=str(default)))
+            except (ValueError, configparser.NoSectionError, configparser.NoOptionError):
+                return default
+
+        def _float_or_default(section: str, key: str, default: float) -> float:
+            try:
+                return float(config.get(section, key, fallback=str(default)))
+            except (ValueError, configparser.NoSectionError, configparser.NoOptionError):
+                return default
+
+        # Extract benchmark-relevant parameters from various sections
+        if config.has_section("model"):
+            extracted["context_size"] = _int_or_default("model", "ctx-size", 2048)
+            extracted["n_predict"] = _int_or_default("model", "n-predict", 512)
+            extracted["threads"] = _int_or_default("model", "threads", 8)
+
+        if config.has_section("sampling"):
+            extracted["temperature"] = _float_or_default("sampling", "temp", 0.7)
+            extracted["top_k"] = _int_or_default("sampling", "top-k", 40)
+            extracted["top_p"] = _float_or_default("sampling", "top-p", 0.95)
+
+        # Also check for flattened keys in [server] or root-like sections
+        for section in ["server", "performance"]:
+            if config.has_section(section):
+                extracted["context_size"] = _int_or_default(
+                    section, "context_size", extracted.get("context_size", 2048)
+                )
+                extracted["n_predict"] = _int_or_default(
+                    section, "n-predict", extracted.get("n_predict", 512)
+                )
+
+        if not extracted:
+            self._send_json(400, {
+                "error": "No benchmark parameters found in INI file. Expected [model] with ctx-size/n-predict/threads and/or [sampling] with temp/top-k/top-p.",
+            })
+            return
+
+        self._send_json(200, {"config": extracted})
+
 
 # ── Module-level server reference ──────────────────────────────────────
 
 _api_server: HTTPServer | None = None
 
 
-def api_server(host: str = "127.0.0.1", port: int = 8501) -> HTTPServer:
+def api_server(host: str = "127.0.0.1", port: int = 8501, debug: bool = False) -> HTTPServer:
     """Create and return an HTTPServer wired to a ServerContext.
 
     The ServerContext owns all business state (config, process_manager,
@@ -1321,6 +1640,10 @@ def api_server(host: str = "127.0.0.1", port: int = 8501) -> HTTPServer:
     via their constructor so every request shares a single seam.
     """
     global _api_server
+
+    # Enable verbose logging before any module initializes its logger
+    if debug:
+        setup_logger(debug=True)
 
     ctx = ServerContext()
     ctx.init_gpu_detection()
@@ -1348,10 +1671,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="llama-launcher API server")
     parser.add_argument("-p", "--port", type=int, default=8501)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--debug", action="store_true", help="Enable DEBUG-level logging to stderr")
     args = parser.parse_args()
 
-    server = api_server(args.host, args.port)
-    print(f"API server running on http://{args.host}:{args.port}")
+    server = api_server(args.host, args.port, debug=args.debug)
+    print(f"API server running on http://{args.host}:{args.port}" + (" [DEBUG]" if args.debug else ""))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

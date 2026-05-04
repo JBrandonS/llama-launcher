@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, ChevronUp, FolderOpen, Download, Globe, Terminal, Copy, Loader2, Save, Upload, Radio } from 'lucide-react';
+import { Server, AlertCircle, Cpu, Zap, Braces, Settings2, ChevronDown, ChevronUp, FolderOpen, Globe, Terminal, Copy, Loader2, Save, Upload, Radio } from 'lucide-react';
 import { cn } from '@utils/cn';
 import { apiService } from '@services/apiService';
-import type { ServerInfo, Settings as SettingsType, ValidationError, QuantizationInfo } from '@services/types';
+import type { ServerInfo, Settings as SettingsType, ValidationError } from '@services/types';
 import { PresetsManager } from '@components/launch/PresetsManager';
 import type { Preset } from '@components/launch/PresetsManager';
 import { TemplateSelector } from '@components/launch/TemplateSelector';
@@ -240,16 +240,8 @@ export function LaunchPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── HuggingFace model input ──────────────────────────────────
-  const [hfModelInput, setHfModelInput] = useState('');
-  const [resolvedModel, setResolvedModel] = useState<string | null>(null);
-  const [quantizations, setQuantizations] = useState<QuantizationInfo[]>([]);
-  const [selectedQuantization, setSelectedQuantization] = useState<string>('');
-  const [isResolving, setIsResolving] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<string>('');
-  const hfInputRef = useRef<HTMLInputElement>(null);
   const [previewCommand, setPreviewCommand] = useState<string | null>(null);
+  const [iniPreview, setIniPreview] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showIniPreview, setShowIniPreview] = useState(false);
@@ -271,9 +263,28 @@ export function LaunchPage() {
     }
   }, [selectedModelPath, form]);
 
+  const getIniPreview = useCallback(async () => {
+    if (!selectedModelPath) {
+      setIniPreview(null);
+      return;
+    }
+    try {
+      const result = await apiService.getLaunchIni(selectedModelPath, form as unknown as Record<string, unknown>);
+      setIniPreview(result.ini || null);
+    } catch {
+      setIniPreview(null);
+    }
+  }, [selectedModelPath, form]);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const timer = setTimeout(getPreview, 300);
+    return () => clearTimeout(timer);
+  }, [selectedModelPath, JSON.stringify(form)]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const timer = setTimeout(getIniPreview, 300);
     return () => clearTimeout(timer);
   }, [selectedModelPath, JSON.stringify(form)]);
 
@@ -307,78 +318,6 @@ export function LaunchPage() {
 
   // Use fetchedModels directly — no local state sync needed
   const models = fetchedModels;
-
-  // ── Resolve alias + fetch quantizations when HF model input changes ─
-  useEffect(() => {
-    const input = hfModelInput.trim();
-    if (!input) {
-      setResolvedModel(null);
-      setQuantizations([]);
-      setSelectedQuantization('');
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setIsResolving(true);
-      try {
-        // Resolve alias synchronously, then fetch quantizations
-        const resolved = TemplateLoader.resolveAlias(input);
-        setResolvedModel(resolved);
-        const quantData = await apiService.getModelQuantizations(resolved);
-        if (quantData?.quantizations) {
-          setQuantizations(quantData.quantizations);
-          // Auto-select recommended
-          const recommended = quantData.quantizations.find((q: QuantizationInfo) => q.isRecommended);
-          if (recommended) {
-            setSelectedQuantization(recommended.tag);
-          }
-        }
-      } catch {
-        setResolvedModel(null);
-        setQuantizations([]);
-      } finally {
-        setIsResolving(false);
-      }
-    }, 400);
-
-    return () => clearTimeout(timer);
-  }, [hfModelInput]);
-
-  // ── Handle model selection from HF + quantization ──
-  const handleHfModelSelect = useCallback(async () => {
-    if (!resolvedModel || !selectedQuantization) return;
-    setIsDownloading(true);
-    setDownloadProgress('Starting download...');
-    try {
-      const result = await apiService.downloadModel({
-        model: resolvedModel,
-        quantization: selectedQuantization,
-      });
-      if (result?.status === 'success' || result?.message?.includes('Downloaded successfully')) {
-        setDownloadProgress('Download complete!');
-        // Refresh model list
-        await queryClient.invalidateQueries({ queryKey: ['models'] });
-        toast.success('Model downloaded', {
-          description: `${resolvedModel} (${selectedQuantization}) is now available.`,
-        });
-        // Clear HF state
-        setHfModelInput('');
-        setResolvedModel(null);
-        setQuantizations([]);
-        setSelectedQuantization('');
-        setDownloadProgress('');
-      } else {
-        setDownloadProgress(result?.message || 'Download failed');
-        toast.error('Download failed', { description: result?.message || 'Unknown error' });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Download failed';
-      setDownloadProgress(message);
-      toast.error('Download failed', { description: message });
-    } finally {
-      setIsDownloading(false);
-    }
-  }, [resolvedModel, selectedQuantization, queryClient]);
 
   const existingPorts = useMemo(
     () => new Set((servers ?? []).map((s: ServerInfo) => s.port ?? 0).filter((p) => p > 0)),
@@ -896,54 +835,6 @@ export function LaunchPage() {
                 <span className="hidden sm:inline">Browse</span>
               </button>
             </div>
-          </div>
-
-          {/* ── Direct model name input ── */}
-          <div className="mt-3">
-            <label className="block text-sm font-medium mb-1">Or type a model name or path</label>
-            <div className="flex gap-2">
-              <input
-                ref={hfInputRef}
-                type="text"
-                value={hfModelInput}
-                onChange={(e) => {
-                  setHfModelInput(e.target.value);
-                  setDownloadProgress('');
-                }}
-                placeholder="e.g. /path/to/model.gguf or meta-llama/Llama-3.2-1B"
-                className="flex-1 rounded-md border bg-transparent px-3 py-2 text-sm outline-none transition-colors
-                  focus:border-ring focus:ring-2 focus:ring-ring/20 placeholder:text-muted-foreground"
-              />
-              {resolvedModel && quantizations.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleHfModelSelect}
-                  disabled={isDownloading || !selectedQuantization}
-                  className={cn(
-                    'inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors',
-                    'hover:bg-primary/90',
-                    (isDownloading || !selectedQuantization) && 'cursor-not-allowed opacity-50'
-                  )}
-                >
-                  {isDownloading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span className="hidden sm:inline">{downloadProgress || 'Downloading...'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-4 w-4" />
-                      <span className="hidden sm:inline">Download</span>
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-            {hfModelInput.trim() && !resolvedModel && !isResolving && (
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Type a local path (.gguf) or HuggingFace identifier (e.g. meta-llama/Llama-3.2-1B)
-              </p>
-            )}
           </div>
         </div>
         <div className="mt-2">
@@ -1472,38 +1363,15 @@ export function LaunchPage() {
               {showIniPreview ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </button>
 
-            {showIniPreview && (
+             {showIniPreview && (
               <div className="p-4">
                 {previewLoading ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     Generating...
                   </div>
-                ) : previewCommand ? (
-                  <pre className="max-h-60 overflow-auto rounded-md bg-background p-3 font-mono text-xs leading-relaxed text-foreground">
-{`[server]
-host = 127.0.0.1
-port = ${port || 12345}
-
-[model]
-path = ${selectedModelPath}
-ctx-size = ${form.context_size || 2048}
-gpu-layers = ${form.gpu_layers || 35}
-threads = ${form.threads || 8}
-seed = ${form.seed || -1}
-${form.embedding ? 'embedding = true' : ''}
-
-[sampling]
-temp = ${form.temp ?? 0.8}
-top-k = ${form.top_k || 40}
-top-p = ${form.top_p ?? 0.95}
-repeat-penalty = ${form.repeat_penalty ?? 1.1}
-frequency-penalty = ${form.frequency_penalty ?? 0.0}
-
-[performance]
-batch-size = ${form.batch_size || 512}
-cache-reuse = ${form.cache_reuse || 0}`}
-                  </pre>
+                ) : iniPreview ? (
+                  <pre className="max-h-60 overflow-auto rounded-md bg-background p-3 font-mono text-xs leading-relaxed text-foreground">{iniPreview}</pre>
                 ) : (
                   <p className="text-sm text-muted-foreground">Select a model to see the INI config.</p>
                 )}

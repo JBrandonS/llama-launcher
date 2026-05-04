@@ -21,10 +21,10 @@ fi
 # ── GPU disable for QtWebEngine (MUST precede Python/Qt load) ──
 # Prevents vkCreateDevice/GBM crashes when Vulkan or hardware
 # acceleration is unavailable (headless, CI, or missing drivers).
-export QTWEBENGINE_DISABLE_GPU=1
-export QTWEBENGINE_GPU_PROCESS=disabled
-export QTWEBENGINE_SANDBOX=0
-export QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --disable-gpu-compositing --disable-gpu-driver-bug-workarounds --disable-gpu-sandbox"
+# export QTWEBENGINE_DISABLE_GPU=1
+# export QTWEBENGINE_GPU_PROCESS=disabled
+# export QTWEBENGINE_SANDBOX=0
+# export QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --disable-gpu-compositing --disable-gpu-driver-bug-workarounds --disable-gpu-sandbox"
 
 if command -v python3 &>/dev/null; then
     python3 "$SCRIPT_DIR/ui/launcher.py" "$@"

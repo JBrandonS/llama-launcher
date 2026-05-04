@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiService } from '@services/apiService';
 import { Cpu, MemoryStick, HardDrive, TrendingUp, Server, Clock, Zap, Microchip, Thermometer, Power, AlertTriangle, Activity } from 'lucide-react';
@@ -37,9 +37,11 @@ export function DashboardPage() {
 
   // Track last-seen timestamp for error states
   const [lastGpuMetricsSeen, setLastGpuMetricsSeen] = useState<Date | null>(null);
-  if (gpuMetrics && !gpuLoading) {
-    setLastGpuMetricsSeen(new Date());
-  }
+  useEffect(() => {
+    if (gpuMetrics && !gpuLoading) {
+      setLastGpuMetricsSeen(new Date());
+    }
+  }, [gpuMetrics, gpuLoading]);
 
   const totalServers = servers?.length ?? 0;
   const runningServers = servers?.filter(s => s.status === 'running').length ?? 0;
