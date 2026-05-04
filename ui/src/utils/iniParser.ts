@@ -41,28 +41,6 @@ export function parseIni(content: string): IniData {
   return result;
 }
 
-/** Map of llama.cpp CLI flag names to INI key names. */
-const FLAG_TO_INI_KEY: Record<string, string> = {
-  'model': 'path',
-  'host': 'host',
-  'port': 'port',
-  'ctx-size': 'ctx-size',
-  'n-gpu-layers': 'gpu-layers',
-  'threads': 'threads',
-  'temp': 'temp',
-  'top-k': 'top-k',
-  'top-p': 'top-p',
-  'n-predict': 'n-predict',
-  'embedding': 'embedding',
-  'rope-scaling': 'rope-scaling',
-  'repeat-penalty': 'repeat-penalty',
-};
-
-/** Map of INI keys back to llama.cpp CLI flag names. */
-const INI_KEY_TO_FLAG: Record<string, string> = Object.fromEntries(
-  Object.entries(FLAG_TO_INI_KEY).map(([k, v]) => [v, k])
-);
-
 export interface ParsedModelConfig {
   modelPath?: string;
   host?: string;
@@ -117,21 +95,21 @@ export function iniKeysToFormFields(ini: IniData): Record<string, string> {
   const samplingSection = ini['sampling'] || {};
   const advancedSection = ini['advanced'] || {};
 
+  // Helper: convert kebab-case to snake_case for form field names
+  const toSnakeCase = (key: string): string => key.replace(/-([a-z])/g, (_, c) => '_' + c);
+
   // Map INI keys to form field names
   for (const [key, value] of Object.entries(modelSection)) {
-    const flagKey = INI_KEY_TO_FLAG[key] || key;
-    if (flagKey === 'path') fields.modelPath = value;
-    else fields[flagKey] = value;
+    if (key === 'path') fields.modelPath = value;
+    else fields[toSnakeCase(key)] = value;
   }
 
   for (const [key, value] of Object.entries(samplingSection)) {
-    const flagKey = INI_KEY_TO_FLAG[key] || key;
-    fields[flagKey] = value;
+    fields[toSnakeCase(key)] = value;
   }
 
   for (const [key, value] of Object.entries(advancedSection)) {
-    const flagKey = INI_KEY_TO_FLAG[key] || key;
-    fields[flagKey] = value;
+    fields[toSnakeCase(key)] = value;
   }
 
   return fields;

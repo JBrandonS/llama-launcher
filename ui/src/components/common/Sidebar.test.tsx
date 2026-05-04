@@ -53,7 +53,7 @@ describe('Sidebar', () => {
   });
 
   it('hides version number when collapsed', () => {
-    const { container } = renderSidebar(true);
+    renderSidebar(true);
     // Version text should not be in the document when collapsed
     expect(screen.queryByText('v0.1.1')).not.toBeInTheDocument();
   });

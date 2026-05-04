@@ -51,7 +51,7 @@ describe('escapeHtml', () => {
 
 describe('formatBytes', () => {
   it('formats null/undefined as em dash', () => {
-    expect(formatBytes(null)).toBe('—');
+    expect(formatBytes(null as unknown as number)).toBe('—');
     expect(formatBytes(undefined as any)).toBe('—');
   });
 
@@ -79,8 +79,8 @@ describe('formatNumber', () => {
     expect(formatNumber(3.14159, 0)).toBe('3');
   });
 
-  it('returns em dash for null/undefined', () => {
-    expect(formatNumber(null as any)).toBe('—');
-    expect(formatNumber(undefined)).toBe('—');
+it('returns em dash for null/undefined', () => {
+    expect(formatNumber(null as unknown as number)).toBe('—');
+    expect(formatNumber(undefined as any)).toBe('—');
   });
 });

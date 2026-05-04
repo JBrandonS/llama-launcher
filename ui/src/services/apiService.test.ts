@@ -252,7 +252,7 @@ describe('apiService', () => {
 
     it('updateSettings sends PUT and returns true', async () => {
       mockResponse({});
-      const result = await apiService.updateSettings({ theme: 'light' });
+      const result = await apiService.updateSettings({ logLevel: 'debug' });
       expect(result).toBe(true);
     });
   });

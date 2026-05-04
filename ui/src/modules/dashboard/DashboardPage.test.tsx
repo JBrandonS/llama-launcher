@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { DashboardPage } from './DashboardPage';
@@ -13,8 +13,6 @@ vi.mock('@services/apiService', () => ({
     getGpuMetrics: vi.fn(),
   },
 }));
-
-import { apiService } from '@services/apiService';
 
 function createWrapper(queryClient: QueryClient) {
   return ({ children }: { children: React.ReactNode }) => (
@@ -195,7 +193,13 @@ describe('DashboardPage', () => {
     render(<DashboardPage />, { wrapper: createWrapper(queryClient) });
 
     // Click on Servers tab
-    fireEvent.click(screen.getByText('Servers'));
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      if (btn.textContent?.trim() === 'Servers') {
+        fireEvent.click(btn);
+        break;
+      }
+    }
     expect(screen.getByText('Top Servers by Token Usage')).toBeInTheDocument();
   });
 

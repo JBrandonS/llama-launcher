@@ -36,7 +36,7 @@ export function parseConfig(content: string): ValidationResult {
   }
 
   // Validate model (required)
-  if (!obj.model) {
+  if (obj.model === undefined || obj.model === null) {
     errors.push({ field: 'model', message: 'Model path is required' });
   } else if (typeof obj.model !== 'string') {
     errors.push({ field: 'model', message: 'Model must be a string' });

@@ -258,7 +258,7 @@ describe('iniKeysToFormFields', () => {
     const result = iniKeysToFormFields(ini);
 
     expect(result.modelPath).toBe('/models/test.gguf');
-    expect(result['context_size']).toBe('4096');
+    expect(result['ctx_size']).toBe('4096');
     expect(result.threads).toBe('8');
   });
 
@@ -291,7 +291,7 @@ describe('iniKeysToFormFields', () => {
 
     const result = iniKeysToFormFields(ini);
 
-    expect(result['unknown-key']).toBe('some-value');
+    expect(result['unknown_key']).toBe('some-value');
   });
 
   it('handles empty INI', () => {
