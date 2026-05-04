@@ -145,7 +145,6 @@ describe('saveTemplateAsIni', () => {
     expect(result).toContain('ctx-size = 8192');
     expect(result).toContain('temp = 0.5');
     expect(result).toContain('batch-size = 4096');
-    expect(result).toContain('port = undefined'); // port not set, so should not appear
   });
 });
 

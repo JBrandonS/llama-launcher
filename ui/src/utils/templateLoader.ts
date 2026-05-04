@@ -293,15 +293,17 @@ function fromIniString(ini: string): Record<string, Record<string, string>> {
 
 function toTemplateArgs(sections: Record<string, Record<string, string>>): TemplateArgs {
   const args: TemplateArgs = {};
-  const keyMap = new Map<string, keyof TemplateArgs>();
-
+  // Build direct map: INI key -> TemplateArgs key (using the first matching section)
+  const iniKeyMap = new Map<string, keyof TemplateArgs>();
   for (const [key, section] of SECTION_MAP) {
-    keyMap.set(section, key as keyof TemplateArgs);
+    const [_targetSection, targetKey] = section.split('.');
+    // If multiple sections use the same INI key, last one wins (shouldn't happen in practice)
+    iniKeyMap.set(targetKey, key as keyof TemplateArgs);
   }
 
-  for (const [, values] of Object.entries(sections)) {
-    for (const [key, value] of Object.entries(values)) {
-      const targetKey = keyMap.get(key);
+  for (const [_, values] of Object.entries(sections)) {
+    for (const [iniKey, value] of Object.entries(values)) {
+      const targetKey = iniKeyMap.get(iniKey);
       if (!targetKey) continue;
 
       // Parse numeric values

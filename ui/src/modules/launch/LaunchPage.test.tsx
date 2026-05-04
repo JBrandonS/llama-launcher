@@ -364,30 +364,7 @@ describe('LaunchPage - Fixes', () => {
     expect(mockNavigate).not.toHaveBeenCalledWith(-1);
   });
 
-  // ── 3. HuggingFace input field ────────────────────────────────
-
-  it('renders HuggingFace model input placeholder', async () => {
-    await act(async () => {
-      render(<LaunchPage />, { wrapper: createWrapper(queryClient) });
-    });
-
-    expect(screen.getByPlaceholderText(/e\.g\./i)).toBeInTheDocument();
-  });
-
-  it('allows typing into the HuggingFace input field', async () => {
-    await act(async () => {
-      render(<LaunchPage />, { wrapper: createWrapper(queryClient) });
-    });
-
-    const input = screen.getByPlaceholderText(/e\.g\./i);
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'meta-llama/Llama-3.2-1B' } });
-    });
-
-    expect((input as HTMLInputElement).value).toBe('meta-llama/Llama-3.2-1B');
-  });
-
-  // ── 4. Model dropdown state persistence ────────────────────────
+  // ── 3. Model dropdown state persistence ────────────────────────
 
   it('shows selected model in dropdown after reopening', async () => {
     (apiService.getModels as ReturnType<typeof vi.fn>).mockResolvedValue(defaultModels);

@@ -19,6 +19,7 @@ export default defineConfig({
       '@utils': resolve(src, 'utils'),
       '@hooks': resolve(src, 'hooks'),
       '@styles': resolve(src, 'styles'),
+      '@shared': resolve(src, 'shared'),
     },
   },
   test: {
