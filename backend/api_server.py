@@ -502,10 +502,13 @@ class APIHandler(BaseHTTPRequestHandler):
     def _parse_server_log_line(line: str, server_id: str) -> Dict[str, str]:
         """Parse a llama-server log line into a LogEntry dict.
 
-        llama.cpp log format examples:
+        Handles multiple llama-server output formats:
         - [2024-01-15 10:30:45 +0000] [INFO] ggml_init: ...
-        - llama_server_start: kv self-size = 8192.00 MB
         - [ERROR] failed to load model: ...
+        - llama_server_start: kv self-size = 8192.00 MB
+        - llama_model_load: loaded ...
+        - error: something went wrong
+        - warn: something questionable
         """
         timestamp = ""
         level = "INFO"
@@ -517,19 +520,32 @@ class APIHandler(BaseHTTPRequestHandler):
         if ts_match:
             timestamp = ts_match.group(1).replace(' ', 'T')
 
-        # Try to extract level
+        # Try to extract level from brackets: [INFO], [ERROR], etc.
         level_match = re.search(r'\[(DEBUG|INFO|WARN(?:ING)?|ERROR|CRITICAL)\]', line, re.IGNORECASE)
         if level_match:
             level = level_match.group(1).upper()
             if level == "WARN":
                 level = "WARNING"
             message = line[level_match.end():].strip()
-        elif line.lower().startswith("error"):
+        # Handle lines starting with "error:" or "warn:" (lowercase)
+        elif re.match(r'^error[:\s]', line, re.IGNORECASE):
             level = "ERROR"
-            message = line[5:].strip().lstrip(": ").lstrip("- ")
-        elif line.lower().startswith("warn"):
+            message = re.sub(r'^error[:\s]+', '', line, flags=re.IGNORECASE).strip()
+        elif re.match(r'^warn[:\s]', line, re.IGNORECASE):
             level = "WARNING"
-            message = line[4:].strip().lstrip(": ").lstrip("- ")
+            message = re.sub(r'^warn[:\s]+', '', line, flags=re.IGNORECASE).strip()
+        # Handle llama.cpp style: llama_xxx: message
+        elif re.match(r'^llama[_a-z]*:', line, re.IGNORECASE):
+            level = "INFO"
+            component = "llama-server"
+            message = line
+        # Handle plain text without any markers - check for common error patterns
+        elif re.search(r'\b(error|failed|exception|fatal|critical)\b', line, re.IGNORECASE):
+            level = "ERROR"
+            message = line
+        elif re.search(r'\b(warn|warning)\b', line, re.IGNORECASE):
+            level = "WARNING"
+            message = line
 
         return {
             "timestamp": timestamp,

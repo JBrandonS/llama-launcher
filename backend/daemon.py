@@ -94,8 +94,20 @@ def generate_systemd_service(
     description: str,
     exec_start: str,
     after: str = "network.target",
-    user: str = "root"
+    user: str = "root",
+    log_file: Optional[str] = None,
 ) -> str:
+    # Build standard output/error directives if a log file is provided
+    stdout_lines = ""
+    if log_file:
+        # Ensure the log directory exists via ExecStartPre
+        log_dir = str(Path(log_file).parent)
+        stdout_lines = (
+            f"\nExecStartPre=/bin/mkdir -p {log_dir}\n"
+            f"StandardOutput=append:{log_file}\n"
+            f"StandardError=append:{log_file}"
+        )
+
     return f"""[Unit]
 Description={description}
 After={after}
@@ -103,7 +115,7 @@ After={after}
 [Service]
 Type=simple
 User={user}
-ExecStart={exec_start}
+ExecStart={exec_start}{stdout_lines}
 Restart=on-failure
 RestartSec=10
 
@@ -133,6 +145,75 @@ def generate_service_file(
     path.write_text(content)
     _current_service_path = str(path)
     return str(path)
+
+
+def generate_server_service(
+    port: int,
+    model_path: str,
+    host: str = "127.0.0.1",
+    n_ctx: int = 4096,
+    n_gpu_layers: int = -1,
+    threads: int = 4,
+    temp: float = 0.7,
+    top_k: int = 40,
+    top_p: float = 0.95,
+    n_predict: int = 256,
+    user: str = "root",
+    log_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Generate a systemd service file for a llama-server instance.
+
+    The service writes logs to ~/.cache/llama-launcher/logs/server_<port>.log
+    by default, which is compatible with the log viewer.
+
+    Returns a dict with 'service_path' and 'log_file' keys.
+    """
+    global _current_service_path
+
+    # Determine log file path
+    if log_dir is None:
+        from backend.constants import LOG_DIR
+        log_dir = str(LOG_DIR)
+
+    log_file = f"{log_dir}/server_{port}.log"
+
+    # Build the llama-server command
+    cmd_parts = ["llama-server"]
+    cmd_parts.extend(["--model", model_path])
+    cmd_parts.extend(["--host", host])
+    cmd_parts.extend(["--port", str(port)])
+    cmd_parts.extend(["--threads", str(threads)])
+    cmd_parts.extend(["--ctx-size", str(n_ctx)])
+    if n_gpu_layers != -1:
+        cmd_parts.extend(["--n-gpu-layers", str(n_gpu_layers)])
+    cmd_parts.extend(["--temp", str(temp)])
+    cmd_parts.extend(["--top-k", str(top_k)])
+    cmd_parts.extend(["--top-p", str(top_p)])
+    cmd_parts.extend(["--n-predict", str(n_predict)])
+
+    exec_start = " ".join(cmd_parts)
+    service_name = f"llama-server-{port}"
+    description = f"Llama server on port {port} ({model_path})"
+
+    content = generate_systemd_service(
+        service_name=service_name,
+        description=description,
+        exec_start=exec_start,
+        user=user,
+        log_file=log_file,
+    )
+
+    # Write the service file to the standard service directory
+    path = get_service_file_path(service_name)
+    path.write_text(content)
+    _current_service_path = str(path)
+
+    return {
+        "service_path": str(path),
+        "log_file": log_file,
+        "port": port,
+        "command": exec_start,
+    }
 
 
 def get_service_path() -> Optional[str]:
