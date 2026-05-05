@@ -431,4 +431,22 @@ export const apiService = {
     const res = await request('/saved-benchmark-clear', { method: 'DELETE' });
     return res.ok;
   },
+
+  // ── INI server loading ────────────────────────────────────────────
+
+  /** Load server configurations from INI files in a directory. */
+  async getIniServers(dir?: string): Promise<{ configs: any[]; dir: string }> {
+    const params = dir ? `?dir=${encodeURIComponent(dir)}` : '';
+    const res = await request(`/ini-servers${params}`);
+    return res.ok ? (res.data as { configs: any[]; dir: string }) : { configs: [], dir: dir || '' };
+  },
+
+  /** Launch a server from an INI config file. */
+  async iniLaunch(configPath: string): Promise<any> {
+    const res = await request('/ini-launch', {
+      method: 'POST',
+      body: JSON.stringify({ config_path: configPath }),
+    });
+    return res.ok ? res.data : null;
+  },
 };

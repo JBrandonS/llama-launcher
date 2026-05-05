@@ -11,6 +11,7 @@ import {
   Rocket,
   Database,
   BarChart3,
+  FolderOpen,
    Menu,
   X,
   ChevronLeft,
@@ -19,6 +20,7 @@ import {
 
 const navItems = [
   { to: '/launch', label: 'Launch', icon: Rocket },
+  { to: '/load', label: 'Load', icon: FolderOpen },
  
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/servers', label: 'Servers', icon: Server },

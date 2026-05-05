@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -128,6 +129,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_get_benchmark_result_by_name(path)
             elif path == "/benchmark/results":
                 self._handle_get_benchmark_results()
+            elif path == "/ini-servers":
+                self._handle_get_ini_servers()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -175,6 +178,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._handle_benchmark_run()
             elif path == "/benchmark/ini":
                 self._handle_post_benchmark_ini()
+            elif path == "/ini-launch":
+                self._handle_post_ini_launch()
             else:
                 self._send_json(404, {"error": f"Not found: {self.path}"})
         except Exception as e:
@@ -394,18 +399,26 @@ class APIHandler(BaseHTTPRequestHandler):
     def _handle_get_servers(self, path: str) -> None:
         servers = self.ctx.process_manager.list_servers()
         result = []
+        now = time.time()
         for port, record in servers.items():
             try:
                 os.kill(record["pid"], 0)
                 status = "running"
             except Exception:
                 status = "stale"
+            started_at = record.get("started_at")
+            uptime_seconds = round(now - started_at, 1) if started_at else 0
+            model_path = record.get("model", "")
+            name = Path(model_path).stem if model_path else f"server-{port}"
             result.append({
+                "id": str(port),
+                "name": name,
                 "port": port,
                 "pid": record.get("pid"),
                 "status": status,
-                "model": record.get("model"),
-                "started_at": record.get("started_at"),
+                "model": model_path,
+                "started_at": started_at,
+                "uptimeSeconds": uptime_seconds,
             })
         self._send_json(200, result)
 
@@ -516,9 +529,9 @@ class APIHandler(BaseHTTPRequestHandler):
         message = line
 
         # Try to extract timestamp: [YYYY-MM-DD HH:MM:SS ...]
-        ts_match = re.search(r'\[(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\]]*)\]', line)
+        ts_match = re.search(r'\[(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2}:\d{2}[^\]]*)\]', line)
         if ts_match:
-            timestamp = ts_match.group(1).replace(' ', 'T')
+            timestamp = f"{ts_match.group(1)}T{ts_match.group(2)}"
 
         # Try to extract level from brackets: [INFO], [ERROR], etc.
         level_match = re.search(r'\[(DEBUG|INFO|WARN(?:ING)?|ERROR|CRITICAL)\]', line, re.IGNORECASE)
@@ -820,8 +833,11 @@ class APIHandler(BaseHTTPRequestHandler):
         entries = []
         log_file = log_dir / "launcher.log"
         lines: list[str] = []
+        total_lines = 0
         if log_file.exists():
-            lines = log_file.read_text().splitlines()[-limit:]
+            all_lines = log_file.read_text().splitlines()
+            total_lines = len(all_lines)
+            lines = all_lines[-limit:]
             for line in lines:
                 try:
                     entry = json.loads(line)
@@ -838,7 +854,6 @@ class APIHandler(BaseHTTPRequestHandler):
                         "component": "",
                         "message": line,
                     })
-        total_lines = len(lines)
         self._send_json(200, {"entries": entries, "hasMore": total_lines > limit})
 
     def _handle_get_daemon_service(self) -> None:
@@ -1641,6 +1656,77 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         self._send_json(200, {"config": extracted})
+
+    # ── INI server loading handlers ────────────────────────────────────
+
+    def _handle_get_ini_servers(self) -> None:
+        """Load server configurations from INI files in a directory.
+
+        Query parameter: dir (optional) — path to directory containing .ini files.
+        Defaults to ~/llama/servers/ if not specified.
+        """
+        ini_dir = ""
+        if "?" in self.path:
+            qs = self.path.split("?", 1)[1]
+            for param in qs.split("&"):
+                if param.startswith("dir="):
+                    ini_dir = param.split("=", 1)[1]
+
+        if not ini_dir:
+            ini_dir = str(Path.home() / "llama" / "servers")
+
+        from backend.ini_writer import load_server_configs
+        configs = load_server_configs(ini_dir)
+        self._send_json(200, {"configs": configs, "dir": ini_dir})
+
+    def _handle_post_ini_launch(self) -> None:
+        """Launch a server from an INI config file.
+
+        Accepts JSON body with config_path pointing to a single .ini file.
+        """
+        body = self._read_body()
+        config_path = body.get("config_path", "")
+
+        if not config_path:
+            self._send_json(400, {"error": "config_path is required"})
+            return
+
+        from backend.ini_writer import load_server_configs
+        configs = load_server_configs(config_path)
+
+        if not configs:
+            self._send_json(400, {"error": f"No valid server configs found in {config_path}"})
+            return
+
+        config = configs[0]  # Launch first (and only) config
+        model_path = config.get("model", "")
+        port = int(config.get("port", 12345))
+
+        if not model_path:
+            self._send_json(400, {"error": "Model path is required in config"})
+            return
+
+        try:
+            result = self.ctx.process_manager.start_server(
+                model_path=model_path,
+                port=port,
+                n_ctx=int(config.get("context_size", 2048)),
+                n_gpu_layers=int(config.get("gpu_layers", -1)),
+                threads=int(config.get("threads", 8)),
+                temp=float(config.get("temperature", 0.7)),
+                top_k=int(config.get("top_k", 40)),
+                top_p=float(config.get("top_p", 0.95)),
+                n_predict=int(config.get("n_predict", 512)),
+            )
+            self._send_json(200, {
+                "serverId": str(port),
+                "message": result.get("status", "started"),
+                "pid": result.get("pid"),
+                "port": port,
+            })
+        except Exception as e:
+            logger.exception("INI launch failed for %s", model_path)
+            self._send_json(500, {"error": str(e)})
 
 
 # ── Module-level server reference ──────────────────────────────────────
